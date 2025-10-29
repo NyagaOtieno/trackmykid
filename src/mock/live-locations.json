@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1,
+    "bus": {
+      "id": 1,
+      "name": "Morning Express",
+      "plateNumber": "KDH 432A"
+    },
+    "latitude": -1.2921,
+    "longitude": 36.8219,
+    "lastUpdate": "2025-10-08T08:30:00Z"
+  },
+  {
+    "id": 2,
+    "bus": {
+      "id": 2,
+      "name": "Evening Shuttle",
+      "plateNumber": "KDA 671B"
+    },
+    "latitude": -1.3028,
+    "longitude": 36.7073,
+    "lastUpdate": "2025-10-08T08:28:00Z"
+  }
+]

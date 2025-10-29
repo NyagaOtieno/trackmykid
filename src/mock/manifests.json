@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "studentId": 1,
+    "busId": 1,
+    "assistantId": 1,
+    "status": "CHECKED_IN",
+    "latitude": -1.2921,
+    "longitude": 36.8219,
+    "timestamp": "2025-10-08T07:30:00Z"
+  },
+  {
+    "id": 2,
+    "studentId": 2,
+    "busId": 1,
+    "assistantId": 1,
+    "status": "CHECKED_OUT",
+    "latitude": -1.2833,
+    "longitude": 36.8167,
+    "timestamp": "2025-10-08T15:45:00Z"
+  },
+  {
+    "id": 3,
+    "studentId": 3,
+    "busId": 2,
+    "assistantId": 2,
+    "status": "CHECKED_IN",
+    "latitude": -1.3028,
+    "longitude": 36.7073,
+    "timestamp": "2025-10-08T07:45:00Z"
+  }
+]

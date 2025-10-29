@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "name": "Grace Muthoni",
+    "phoneNumber": "+254700123456",
+    "busId": 1
+  },
+  {
+    "id": 2,
+    "name": "Daniel Kamau",
+    "phoneNumber": "+254711234567",
+    "busId": 2
+  },
+  {
+    "id": 3,
+    "name": "Lucy Achieng",
+    "phoneNumber": "+254722345678",
+    "busId": 3
+  }
+]
