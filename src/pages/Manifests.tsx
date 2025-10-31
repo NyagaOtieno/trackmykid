@@ -28,10 +28,13 @@ const getLocationName = async (lat: number, lon: number): Promise<string> => {
 };
 
 export default function Manifests() {
-  const { data: manifests = [], isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['manifests'],
     queryFn: getManifests,
   });
+
+  // ✅ Ensure manifests is always an array
+  const manifests = Array.isArray(data?.data) ? data.data : [];
 
   const [search, setSearch] = useState('');
   const [locations, setLocations] = useState<{ [key: number]: string }>({});
@@ -105,6 +108,7 @@ export default function Manifests() {
         Student: m.student?.name || 'N/A',
         Assistant: m.assistant?.name || 'N/A',
         Bus: m.bus?.plateNumber || m.busId || 'N/A',
+        Session: m.session || 'N/A', // ✅ Added session
         Status: m.status,
         Timestamp: m.date
           ? new Date(m.date).toLocaleString()
@@ -152,6 +156,7 @@ export default function Manifests() {
               <TableHead>Student Name</TableHead>
               <TableHead>Bus Plate</TableHead>
               <TableHead>Assistant Name</TableHead>
+              <TableHead>Session</TableHead> {/* ✅ Added session */}
               <TableHead>Status</TableHead>
               <TableHead>Timestamp</TableHead>
               <TableHead>Location</TableHead>
@@ -160,13 +165,13 @@ export default function Manifests() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   Loading manifests...
                 </TableCell>
               </TableRow>
             ) : currentManifests.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   No manifests found
                 </TableCell>
               </TableRow>
@@ -183,6 +188,7 @@ export default function Manifests() {
                     <TableCell>{m.student?.name || 'N/A'}</TableCell>
                     <TableCell>{m.bus?.plateNumber || m.busId || 'N/A'}</TableCell>
                     <TableCell>{m.assistant?.name || 'N/A'}</TableCell>
+                    <TableCell>{m.session || 'N/A'}</TableCell> {/* ✅ Added session */}
                     <TableCell>
                       <span
                         className={`px-2 py-1 rounded-full text-xs font-medium ${
