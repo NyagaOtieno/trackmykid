@@ -2,14 +2,20 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { toast } from "sonner";
-import axios from "axios";
+import api from "@/api/axiosConfig";
 import { Eye, EyeOff } from "lucide-react";
 
-// ✅ Backend endpoints
-const API_URL = "https://schooltransport-production.up.railway.app/api/auth/login";
-const FORGOT_URL = "https://schooltransport-production.up.railway.app/api/auth/forgot-password";
+// ✅ Backend endpoints (baseURL already handled by api)
+const AUTH_URL = "/auth/login";
+const FORGOT_URL = "/auth/forgot-password";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -24,9 +30,28 @@ export default function Login() {
   // ✅ Redirect if already authenticated
   useEffect(() => {
     const token = localStorage.getItem("token");
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
     const isAuthenticated = localStorage.getItem("isAuthenticated") === "true";
+
     if (token && isAuthenticated) {
-      navigate("/dashboard");
+      // Only redirect based on role
+      switch (user.role) {
+        case "ADMIN":
+          navigate("/dashboard");
+          break;
+        case "PARENT":
+          navigate("/parent-portal");
+          break;
+        case "DRIVER":
+          navigate("/driver-portal");
+          break;
+        case "ASSISTANT":
+          navigate("/assistant-portal");
+          break;
+        default:
+          localStorage.clear();
+          navigate("/");
+      }
     }
   }, [navigate]);
 
@@ -35,22 +60,18 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      // 🚀 Make login request
-      const response = await axios.post(API_URL, { email, password });
-
+      // 🚀 Login via api instance
+      const response = await api.post(AUTH_URL, { email, password });
       const { token, user } = response.data || {};
 
       if (!token || !user) {
         throw new Error("Invalid login response from server");
       }
 
-      // ✅ Store securely in localStorage
+      // ✅ Save session
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("isAuthenticated", "true");
-
-      // ✅ Set axios default header (for all future requests)
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
       toast.success(`Welcome back, ${user.name || "User"}!`);
 
@@ -65,16 +86,25 @@ export default function Login() {
         case "ASSISTANT":
           navigate("/assistant-portal");
           break;
+        case "ADMIN":
+          navigate("/dashboard"); // Only admin can access /dashboard
+          break;
         default:
-          navigate("/dashboard");
+          // Block non-admin from dashboard
+          toast.error("You are not authorized to access the admin dashboard.");
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          localStorage.removeItem("isAuthenticated");
+          navigate("/"); // Redirect to home/login
       }
     } catch (error: any) {
       console.error("Login error:", error);
-      // ❌ Clear old tokens on failed login
       localStorage.removeItem("token");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-      toast.error(error.response?.data?.message || "Login failed. Check your credentials.");
+      toast.error(
+        error.response?.data?.message || "Login failed. Check your credentials."
+      );
     } finally {
       setIsLoading(false);
     }
@@ -87,11 +117,13 @@ export default function Login() {
       return;
     }
     try {
-      await axios.post(FORGOT_URL, { email: forgotEmail });
+      await api.post(FORGOT_URL, { email: forgotEmail });
       toast.success("Password reset link sent to your email.");
       setIsForgotOpen(false);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to send reset link.");
+      toast.error(
+        error.response?.data?.message || "Failed to send reset link."
+      );
     }
   };
 
@@ -99,7 +131,9 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">🎓 SchoolTrack Transport</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">
+            🎓 SchoolTrack Transport
+          </CardTitle>
           <CardDescription className="text-center">
             Enter your credentials to access the system
           </CardDescription>
@@ -163,7 +197,9 @@ export default function Login() {
           {isForgotOpen && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
               <div className="bg-white rounded-xl p-6 shadow-lg w-[90%] max-w-sm">
-                <h2 className="text-lg font-semibold mb-2 text-center">Reset Password</h2>
+                <h2 className="text-lg font-semibold mb-2 text-center">
+                  Reset Password
+                </h2>
                 <p className="text-sm text-gray-500 mb-4 text-center">
                   Enter your email to receive a password reset link.
                 </p>

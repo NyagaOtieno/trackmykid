@@ -2,12 +2,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, XCircle, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import toast from "react-hot-toast";
+import { Toaster, toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -22,46 +22,36 @@ L.Icon.Default.mergeOptions({
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 });
 
-// API endpoints
-const STUDENTS_API =
-  "https://schooltransport-production.up.railway.app/api/students";
-const MANIFEST_API =
-  "https://schooltransport-production.up.railway.app/api/manifests";
+// API Endpoints
+const API_BASE = "https://schooltransport-production.up.railway.app/api";
+const STUDENTS_API = `${API_BASE}/students`;
+const MANIFEST_API = `${API_BASE}/manifests`;
 const GPS_API =
   "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6";
 
 export default function AssistantPortal() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-
-  // Retrieve user info from localStorage (saved at login)
   const user = JSON.parse(localStorage.getItem("user") || "null");
   const token = localStorage.getItem("token");
 
-  // Auto redirect if not logged in
   useEffect(() => {
-    if (!user || !token) {
-      navigate("/login");
-    }
+    if (!user || !token) navigate("/login");
   }, [user, token, navigate]);
 
   const assistantId = user?.id;
   const [busLocation, setBusLocation] = useState<{ lat: number; lng: number } | null>(null);
 
-  // ✅ Logout handler
+  // Logout
   const handleLogout = () => {
     localStorage.removeItem("user");
     localStorage.removeItem("token");
-    toast.success("Logged out successfully");
-    navigate("/login");
+    toast.success("Logged out successfully!");
+    navigate("/");
   };
 
-  // Fetch students
-  const {
-    data: studentsData,
-    isLoading: studentsLoading,
-    isError: studentsError,
-  } = useQuery({
+  // Fetch Students
+  const { data: studentsData, isLoading: studentsLoading, isError: studentsError } = useQuery({
     queryKey: ["students"],
     queryFn: async () => {
       const res = await axios.get(STUDENTS_API, {
@@ -69,9 +59,10 @@ export default function AssistantPortal() {
       });
       return res.data.data || [];
     },
+    onError: () => toast.error("Failed to load students"),
   });
 
-  // Fetch GPS data every 15 seconds
+  // Fetch GPS data
   const { data: gpsData } = useQuery({
     queryKey: ["gps"],
     queryFn: async () => {
@@ -81,23 +72,26 @@ export default function AssistantPortal() {
     refetchInterval: 15000,
   });
 
-  // Filter students for this assistant
   const assignedStudents = Array.isArray(studentsData)
-    ? studentsData.filter((s: any) => s.bus?.assistantId === assistantId)
+    ? studentsData.filter((s) => s.bus?.assistantId === assistantId)
     : [];
 
   const bus = assignedStudents[0]?.bus || null;
 
-  // Update bus location from GPS
+  // Match bus with GPS unit
   useEffect(() => {
     if (bus && gpsData) {
-      const unit = gpsData.find((u: any) => u.number === bus.plateNumber);
+      const unit = gpsData.find(
+        (u) =>
+          u.number?.toLowerCase() === bus.plateNumber?.toLowerCase() ||
+          u.name?.toLowerCase() === bus.plateNumber?.toLowerCase()
+      );
       if (unit) setBusLocation({ lat: unit.lat, lng: unit.lng });
     }
   }, [bus, gpsData]);
 
-  // Fetch manifests
-  const { data: manifestsData } = useQuery({
+  // Fetch Manifests
+  const { data: manifestsData, refetch: refetchManifests } = useQuery({
     queryKey: ["manifests"],
     queryFn: async () => {
       const res = await axios.get(MANIFEST_API, {
@@ -108,48 +102,39 @@ export default function AssistantPortal() {
   });
 
   const manifests = manifestsData || [];
-  const checkedIn = manifests.filter((m: any) => m.status === "CHECKED_IN").length;
-  const checkedOut = manifests.filter((m: any) => m.status === "CHECKED_OUT").length;
 
-  // Mutation for check-in/out
+  // Unified mutation for check-in/out
   const checkMutation = useMutation({
-    mutationFn: async ({
-      studentId,
-      status,
-    }: {
-      studentId: number;
-      status: "CHECKED_IN" | "CHECKED_OUT";
-    }) => {
-      const unit = gpsData?.find((u: any) => u.number === bus?.plateNumber);
+    mutationFn: async ({ studentId, status, session }: any) => {
+      const unit = gpsData?.find(
+        (u) =>
+          u.number?.toLowerCase() === bus?.plateNumber?.toLowerCase() ||
+          u.name?.toLowerCase() === bus?.plateNumber?.toLowerCase()
+      );
+
       const latitude = unit?.lat || 0;
       const longitude = unit?.lng || 0;
 
-      const body = {
-        studentId,
-        busId: bus?.id,
-        assistantId,
-        status,
-        latitude,
-        longitude,
-      };
+      const body = { studentId, busId: bus?.id, assistantId, status, session, latitude, longitude };
+
       const res = await axios.post(MANIFEST_API, body, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return res.data;
     },
-    onSuccess: (data, variables) => {
-      toast.success(
-        `Manifest updated: Student ID ${variables.studentId} is now ${
-          variables.status === "CHECKED_IN" ? "Active" : "Inactive"
-        }`
-      );
+    onSuccess: (_, vars) => {
+      const label =
+        vars.status === "CHECKED_IN" ? `${vars.session} Onboarded` : `${vars.session} Offboarded`;
+      toast.success(`${label} successfully!`);
       queryClient.invalidateQueries(["manifests"]);
+      refetchManifests();
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update manifest: ${error?.message || "Unknown error"}`);
+    onError: (err: any) => {
+      toast.error(`Failed to update manifest: ${err?.response?.data?.message || err.message}`);
     },
   });
 
+  // Loading & error states
   if (studentsLoading)
     return <p className="p-6 text-center text-muted-foreground">Loading assistant info...</p>;
   if (studentsError)
@@ -157,22 +142,48 @@ export default function AssistantPortal() {
   if (!bus)
     return (
       <div className="p-6 text-center">
-        <p>Could not load bus for this assistant.</p>
+        <p>No bus assigned for this assistant.</p>
         <Button onClick={handleLogout} variant="destructive" className="mt-4">
           Logout
         </Button>
       </div>
     );
 
+  // Today filter
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayManifests = manifests.filter((m) => {
+    const manifestDate = new Date(m.date);
+    return manifestDate >= today && m.assistantId === assistantId && m.busId === bus?.id;
+  });
+
+  // Stats
+  const morningOnboarded = todayManifests.filter(
+    (m) => m.session === "MORNING" && m.status === "CHECKED_IN"
+  ).length;
+  const morningOffboarded = todayManifests.filter(
+    (m) => m.session === "MORNING" && m.status === "CHECKED_OUT"
+  ).length;
+  const eveningOnboarded = todayManifests.filter(
+    (m) => m.session === "EVENING" && m.status === "CHECKED_IN"
+  ).length;
+  const eveningOffboarded = todayManifests.filter(
+    (m) => m.session === "EVENING" && m.status === "CHECKED_OUT"
+  ).length;
+
+  const totalOnboarded = morningOnboarded + eveningOnboarded;
+  const totalOffboarded = morningOffboarded + eveningOffboarded;
+
   return (
     <div className="min-h-screen bg-muted/30 p-6">
+      <Toaster position="top-center" richColors closeButton />
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Bus Assistant Portal</h1>
             <p className="text-muted-foreground mt-1">
-              Welcome, {user?.name || "Assistant"} — manage student attendance and safety
+              Welcome, {user?.name || "Assistant"} — manage student attendance
             </p>
           </div>
           <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
@@ -180,43 +191,61 @@ export default function AssistantPortal() {
           </Button>
         </div>
 
-        {/* Dashboard */}
+        {/* Dashboard Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Morning */}
           <Card>
             <CardHeader>
-              <CardTitle>Active</CardTitle>
+              <CardTitle>Morning</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-8 w-8 text-green-500" />
-                <span className="text-3xl font-bold">{checkedIn}</span>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between">
+                <span>Onboarded</span>
+                <span className="font-bold">{morningOnboarded}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Offboarded</span>
+                <span className="font-bold">{morningOffboarded}</span>
               </div>
             </CardContent>
           </Card>
 
+          {/* Evening */}
           <Card>
             <CardHeader>
-              <CardTitle>Inactive</CardTitle>
+              <CardTitle>Evening</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <XCircle className="h-8 w-8 text-gray-400" />
-                <span className="text-3xl font-bold">{checkedOut}</span>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between">
+                <span>Onboarded</span>
+                <span className="font-bold">{eveningOnboarded}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Offboarded</span>
+                <span className="font-bold">{eveningOffboarded}</span>
               </div>
             </CardContent>
           </Card>
 
+          {/* Total */}
           <Card>
             <CardHeader>
-              <CardTitle>Total Students</CardTitle>
+              <CardTitle>Total</CardTitle>
             </CardHeader>
-            <CardContent>
-              <span className="text-3xl font-bold">{assignedStudents.length}</span>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between">
+                <span>Onboarded</span>
+                <span className="font-bold">{totalOnboarded}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Offboarded</span>
+                <span className="font-bold">{totalOffboarded}</span>
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Bus + Map */}
+        {/* Bus Info */}
         <Card>
           <CardHeader>
             <CardTitle>My Bus</CardTitle>
@@ -245,9 +274,7 @@ export default function AssistantPortal() {
                   </Marker>
                 </MapContainer>
               ) : (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Bus location not available
-                </p>
+                <p className="text-sm text-muted-foreground mt-2">Bus location not available</p>
               )}
             </div>
           </CardContent>
@@ -258,59 +285,93 @@ export default function AssistantPortal() {
           <CardHeader>
             <CardTitle>Student Manifest</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-3">
             {assignedStudents.map((student) => {
-              const manifest = manifests.find((m) => m.studentId === student.id);
-              const isActive = manifest?.status === "CHECKED_IN";
-              const isInactive = manifest?.status === "CHECKED_OUT";
+              const morning = todayManifests.find(
+                (m) => m.studentId === student.id && m.session === "MORNING"
+              );
+              const evening = todayManifests.find(
+                (m) => m.studentId === student.id && m.session === "EVENING"
+              );
 
               return (
                 <div
                   key={student.id}
-                  className="flex items-center justify-between p-4 bg-muted rounded-lg"
+                  className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted rounded-lg"
                 >
                   <div className="flex-1">
                     <p className="font-medium">{student.name}</p>
                     <p className="text-sm text-muted-foreground">{student.grade}</p>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    {isActive ? (
-                      <Badge className="bg-green-500 text-white">Active</Badge>
-                    ) : isInactive ? (
-                      <Badge className="bg-gray-400 text-white">Inactive</Badge>
-                    ) : (
-                      <Badge variant="outline">Pending</Badge>
+                  {/* Morning Controls */}
+                  <div className="flex items-center gap-3 mt-3 md:mt-0">
+                    {morning && (
+                      <Badge
+                        className={`${
+                          morning.status === "CHECKED_IN"
+                            ? "bg-green-500 text-white"
+                            : "bg-gray-400 text-white"
+                        }`}
+                      >
+                        Morning {morning.status === "CHECKED_IN" ? "Onboarded" : "Offboarded"}
+                      </Badge>
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_IN", session: "MORNING" })
+                      }
+                      disabled={morning?.status === "CHECKED_IN"}
+                    >
+                      In (M)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_OUT", session: "MORNING" })
+                      }
+                      disabled={morning?.status === "CHECKED_OUT"}
+                    >
+                      Out (M)
+                    </Button>
+                  </div>
 
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={isActive || checkMutation.isLoading}
-                        onClick={() =>
-                          checkMutation.mutate({
-                            studentId: student.id,
-                            status: "CHECKED_IN",
-                          })
-                        }
+                  {/* Evening Controls */}
+                  <div className="flex items-center gap-3 mt-3 md:mt-0">
+                    {evening && (
+                      <Badge
+                        className={`${
+                          evening.status === "CHECKED_IN"
+                            ? "bg-blue-500 text-white"
+                            : "bg-gray-400 text-white"
+                        }`}
                       >
-                        Check In
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={isInactive || checkMutation.isLoading}
-                        onClick={() =>
-                          checkMutation.mutate({
-                            studentId: student.id,
-                            status: "CHECKED_OUT",
-                          })
-                        }
-                      >
-                        Check Out
-                      </Button>
-                    </div>
+                        Evening {evening.status === "CHECKED_IN" ? "Onboarded" : "Offboarded"}
+                      </Badge>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_IN", session: "EVENING" })
+                      }
+                      disabled={evening?.status === "CHECKED_IN"}
+                    >
+                      In (E)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() =>
+                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_OUT", session: "EVENING" })
+                      }
+                      disabled={evening?.status === "CHECKED_OUT"}
+                    >
+                      Out (E)
+                    </Button>
                   </div>
                 </div>
               );

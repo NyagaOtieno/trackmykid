@@ -39,13 +39,20 @@ export default function Dashboard() {
   });
 
   const {
-    data: liveLocations,
+    data: liveData,
     isLoading: loadingTracking,
     error: errorTracking,
   } = useQuery({
     queryKey: ["liveLocations"],
     queryFn: getLiveLocations,
   });
+
+  // Normalize live locations
+  const liveLocations = Array.isArray(liveData)
+    ? liveData
+    : liveData?.data && Array.isArray(liveData.data)
+    ? liveData.data
+    : [];
 
   // Show errors as toast
   if (errorStudents || errorBuses || errorManifests || errorTracking) {
@@ -55,11 +62,13 @@ export default function Dashboard() {
   const isLoading =
     loadingStudents || loadingBuses || loadingManifests || loadingTracking;
 
-  const totalStudents = students?.length || 0;
-  const totalBuses = buses?.length || 0;
-  const totalTrips = manifests?.length || 0;
-  const totalActiveBuses =
-    liveLocations?.filter((loc: any) => loc.status === "ACTIVE").length || 0;
+  const totalStudents = Array.isArray(students) ? students.length : 0;
+  const totalBuses = Array.isArray(buses) ? buses.length : 0;
+  const totalTrips = Array.isArray(manifests) ? manifests.length : 0;
+  const totalActiveBuses = liveLocations.filter(
+    (loc: any) =>
+      loc.status === "ACTIVE" || loc.movementState === "moving"
+  ).length;
 
   return (
     <div className="p-6 space-y-6">
@@ -143,12 +152,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Optional: Recent Activity */}
+      {/* Recent Activity */}
       <div className="mt-8">
         <h2 className="text-lg font-semibold text-gray-700 mb-2">
           Recent Trip Activity
         </h2>
-        {manifests?.length ? (
+        {Array.isArray(manifests) && manifests.length > 0 ? (
           <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="text-gray-600 border-b">
@@ -166,16 +175,14 @@ export default function Dashboard() {
                     className="border-b last:border-0 hover:bg-gray-50 transition"
                   >
                     <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.route || "N/A"}</td>
-                    <td className="py-2 px-3">
-                      {trip.assistant?.name || "—"}
-                    </td>
+                    <td className="py-2 px-3">{trip.bus?.route || "N/A"}</td>
+                    <td className="py-2 px-3">{trip.assistant?.name || "—"}</td>
                     <td className="py-2 px-3">
                       <span
                         className={`px-2 py-1 rounded text-xs font-medium ${
-                          trip.status === "COMPLETED"
+                          trip.status === "CHECKED_OUT"
                             ? "bg-green-100 text-green-700"
-                            : trip.status === "ONGOING"
+                            : trip.status === "CHECKED_IN"
                             ? "bg-yellow-100 text-yellow-700"
                             : "bg-gray-100 text-gray-600"
                         }`}
