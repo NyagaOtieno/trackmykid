@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import { getStudents, getBusLocations } from "@/lib/api";
+import { getStudents } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -52,18 +52,22 @@ export default function ParentPortal() {
     (s: any) => s.parent?.user?.id === parentUserId
   );
 
-  // ✅ Fetch live bus locations
-  const { data: rawLiveLocations, isLoading: loadingLocations } = useQuery({
-    queryKey: ["busLocations"],
-    queryFn: getBusLocations,
+  // ✅ Fetch live bus locations directly from Track-Loc8 API
+  const { data: rawFleetData, isLoading: loadingLocations } = useQuery({
+    queryKey: ["fleetLocations"],
+    queryFn: async () => {
+      const response = await fetch(
+        "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6"
+      );
+      const data = await response.json();
+      return data?.data?.units || [];
+    },
     refetchInterval: 30000, // every 30 seconds
   });
 
-  const allLiveLocations: any[] = Array.isArray(rawLiveLocations)
-    ? rawLiveLocations
-    : [];
+  const allFleetUnits: any[] = Array.isArray(rawFleetData) ? rawFleetData : [];
 
-  // ✅ Create a list of buses belonging to the logged-in parent’s children
+  // ✅ Map student's bus info
   const myBuses = myStudents
     .filter((s: any) => s.bus)
     .map((s: any) => ({
@@ -72,14 +76,17 @@ export default function ParentPortal() {
       name: s.bus.name?.toLowerCase(),
     }));
 
-  // ✅ Filter live locations for parent’s buses
-  const myBusLocations = allLiveLocations.filter((loc: any) => {
-    return myBuses.some(
-      (b) =>
-        b.id === loc.busId ||
-        (loc.plateNumber && b.plateNumber === loc.plateNumber.toLowerCase())
-    );
-  }).filter((loc) => loc.lat != null && loc.lng != null); // ensure valid coordinates
+  // ✅ Match buses by plate number (Track-Loc8 uses "number")
+  const myBusLocations = allFleetUnits
+    .filter((unit) =>
+      myBuses.some(
+        (b) =>
+          b.plateNumber &&
+          unit.number &&
+          b.plateNumber === unit.number.toLowerCase()
+      )
+    )
+    .filter((loc) => loc.lat != null && loc.lng != null);
 
   // ✅ Reverse geocoded addresses (OpenStreetMap)
   const [addressCache, setAddressCache] = useState<Record<string, string>>({});
@@ -98,7 +105,10 @@ export default function ParentPortal() {
           const address = data.display_name || "Unknown location";
           setAddressCache((prev) => ({ ...prev, [key]: address }));
         } catch {
-          setAddressCache((prev) => ({ ...prev, [key]: "Address unavailable" }));
+          setAddressCache((prev) => ({
+            ...prev,
+            [key]: "Address unavailable",
+          }));
         }
       }
     };
@@ -171,15 +181,21 @@ export default function ParentPortal() {
                 <CardContent className="space-y-3">
                   <div className="flex items-center gap-2">
                     <Bus className="h-4 w-4 text-primary" />
-                    <span className="text-sm">{student.bus?.name || "No Bus Assigned"}</span>
+                    <span className="text-sm">
+                      {student.bus?.name || "No Bus Assigned"}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-accent" />
-                    <span className="text-sm">{student.bus?.plateNumber || "N/A"}</span>
+                    <span className="text-sm">
+                      {student.bus?.plateNumber || "N/A"}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">Route</span>
-                    <span className="text-xs">{student.bus?.route || "Not Set"}</span>
+                    <span className="text-xs">
+                      {student.bus?.route || "Not Set"}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -198,7 +214,9 @@ export default function ParentPortal() {
           <CardContent>
             <div className="h-[500px] rounded-lg overflow-hidden">
               {loadingLocations ? (
-                <p className="text-center text-muted-foreground">Loading locations...</p>
+                <p className="text-center text-muted-foreground">
+                  Loading locations...
+                </p>
               ) : myBusLocations.length === 0 ? (
                 <div className="h-full flex items-center justify-center bg-muted">
                   <p className="text-muted-foreground">
@@ -220,13 +238,18 @@ export default function ParentPortal() {
                     const key = `${loc.lat},${loc.lng}`;
                     const address = addressCache[key] || "Fetching address...";
                     return (
-                      <Marker key={loc.busId} position={[loc.lat, loc.lng]} icon={busIcon}>
+                      <Marker key={loc.unit_id} position={[loc.lat, loc.lng]} icon={busIcon}>
                         <Popup>
                           <div className="p-2">
-                            <h3 className="font-bold">{loc.plateNumber || "Unknown Bus"}</h3>
+                            <h3 className="font-bold">
+                              {loc.number || "Unknown Bus"}
+                            </h3>
                             <p className="text-xs mt-1">{address}</p>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Updated: {loc.lastUpdate ? new Date(loc.lastUpdate).toLocaleTimeString() : "N/A"}
+                              Updated:{" "}
+                              {loc.last_update
+                                ? new Date(loc.last_update).toLocaleTimeString()
+                                : "N/A"}
                             </p>
                           </div>
                         </Popup>

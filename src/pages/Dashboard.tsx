@@ -165,6 +165,7 @@ export default function Dashboard() {
                   <th className="py-2 px-3">Bus</th>
                   <th className="py-2 px-3">Route</th>
                   <th className="py-2 px-3">Assistant</th>
+                  <th className="py-2 px-3">Session</th>
                   <th className="py-2 px-3">Status</th>
                 </tr>
               </thead>
@@ -177,6 +178,7 @@ export default function Dashboard() {
                     <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
                     <td className="py-2 px-3">{trip.bus?.route || "N/A"}</td>
                     <td className="py-2 px-3">{trip.assistant?.name || "—"}</td>
+                    <td className="py-2 px-3">{trip.session || "N/A"}</td>
                     <td className="py-2 px-3">
                       <span
                         className={`px-2 py-1 rounded text-xs font-medium ${

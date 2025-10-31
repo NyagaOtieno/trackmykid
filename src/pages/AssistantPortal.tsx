@@ -57,7 +57,7 @@ export default function AssistantPortal() {
       const res = await axios.get(STUDENTS_API, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      return res.data.data || [];
+      return res.data?.data || [];
     },
     onError: () => toast.error("Failed to load students"),
   });
@@ -67,7 +67,7 @@ export default function AssistantPortal() {
     queryKey: ["gps"],
     queryFn: async () => {
       const res = await axios.get(GPS_API);
-      return res.data.data?.units || [];
+      return res.data?.data?.units || [];
     },
     refetchInterval: 15000,
   });
@@ -90,18 +90,19 @@ export default function AssistantPortal() {
     }
   }, [bus, gpsData]);
 
-  // Fetch Manifests
+  // Fetch Manifests (safe guard)
   const { data: manifestsData, refetch: refetchManifests } = useQuery({
     queryKey: ["manifests"],
     queryFn: async () => {
       const res = await axios.get(MANIFEST_API, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      return res.data.data || [];
+      return Array.isArray(res.data?.data) ? res.data.data : [];
     },
+    onError: () => toast.error("Failed to load manifests"),
   });
 
-  const manifests = manifestsData || [];
+  const manifests = Array.isArray(manifestsData) ? manifestsData : [];
 
   // Unified mutation for check-in/out
   const checkMutation = useMutation({
@@ -149,7 +150,7 @@ export default function AssistantPortal() {
       </div>
     );
 
-  // Today filter
+  // Filter manifests for today only
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayManifests = manifests.filter((m) => {
@@ -157,7 +158,7 @@ export default function AssistantPortal() {
     return manifestDate >= today && m.assistantId === assistantId && m.busId === bus?.id;
   });
 
-  // Stats
+  // Session-based stats
   const morningOnboarded = todayManifests.filter(
     (m) => m.session === "MORNING" && m.status === "CHECKED_IN"
   ).length;
@@ -196,7 +197,7 @@ export default function AssistantPortal() {
           {/* Morning */}
           <Card>
             <CardHeader>
-              <CardTitle>Morning</CardTitle>
+              <CardTitle>Morning Session</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between">
@@ -213,7 +214,7 @@ export default function AssistantPortal() {
           {/* Evening */}
           <Card>
             <CardHeader>
-              <CardTitle>Evening</CardTitle>
+              <CardTitle>Evening Session</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between">
@@ -230,7 +231,7 @@ export default function AssistantPortal() {
           {/* Total */}
           <Card>
             <CardHeader>
-              <CardTitle>Total</CardTitle>
+              <CardTitle>Total Summary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="flex justify-between">
@@ -321,7 +322,11 @@ export default function AssistantPortal() {
                       size="sm"
                       variant="outline"
                       onClick={() =>
-                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_IN", session: "MORNING" })
+                        checkMutation.mutate({
+                          studentId: student.id,
+                          status: "CHECKED_IN",
+                          session: "MORNING",
+                        })
                       }
                       disabled={morning?.status === "CHECKED_IN"}
                     >
@@ -331,7 +336,11 @@ export default function AssistantPortal() {
                       size="sm"
                       variant="destructive"
                       onClick={() =>
-                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_OUT", session: "MORNING" })
+                        checkMutation.mutate({
+                          studentId: student.id,
+                          status: "CHECKED_OUT",
+                          session: "MORNING",
+                        })
                       }
                       disabled={morning?.status === "CHECKED_OUT"}
                     >
@@ -356,7 +365,11 @@ export default function AssistantPortal() {
                       size="sm"
                       variant="outline"
                       onClick={() =>
-                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_IN", session: "EVENING" })
+                        checkMutation.mutate({
+                          studentId: student.id,
+                          status: "CHECKED_IN",
+                          session: "EVENING",
+                        })
                       }
                       disabled={evening?.status === "CHECKED_IN"}
                     >
@@ -366,7 +379,11 @@ export default function AssistantPortal() {
                       size="sm"
                       variant="destructive"
                       onClick={() =>
-                        checkMutation.mutate({ studentId: student.id, status: "CHECKED_OUT", session: "EVENING" })
+                        checkMutation.mutate({
+                          studentId: student.id,
+                          status: "CHECKED_OUT",
+                          session: "EVENING",
+                        })
                       }
                       disabled={evening?.status === "CHECKED_OUT"}
                     >
