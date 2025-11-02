@@ -40,7 +40,12 @@ export default function AssistantPortal() {
   }, [user, token, navigate]);
 
   const assistantId = user?.id;
-  const [busLocation, setBusLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [busLocation, setBusLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
+
+  // Search & Pagination
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Logout
   const handleLogout = () => {
@@ -75,22 +80,37 @@ export default function AssistantPortal() {
   const assignedStudents = Array.isArray(studentsData)
     ? studentsData.filter((s) => s.bus?.assistantId === assistantId)
     : [];
-
   const bus = assignedStudents[0]?.bus || null;
 
-  // Match bus with GPS unit
+  // Match bus with GPS unit and reverse geocode
   useEffect(() => {
+    const fetchAddress = async (lat: number, lng: number) => {
+      try {
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`
+        );
+        const geoData = await geoRes.json();
+        return geoData.display_name || "Unknown location";
+      } catch {
+        return "Address unavailable";
+      }
+    };
+
     if (bus && gpsData) {
       const unit = gpsData.find(
         (u) =>
           u.number?.toLowerCase() === bus.plateNumber?.toLowerCase() ||
           u.name?.toLowerCase() === bus.plateNumber?.toLowerCase()
       );
-      if (unit) setBusLocation({ lat: unit.lat, lng: unit.lng });
+      if (unit) {
+        fetchAddress(unit.lat, unit.lng).then((address) =>
+          setBusLocation({ lat: unit.lat, lng: unit.lng, address })
+        );
+      }
     }
   }, [bus, gpsData]);
 
-  // Fetch Manifests (safe guard)
+  // Fetch Manifests
   const { data: manifestsData, refetch: refetchManifests } = useQuery({
     queryKey: ["manifests"],
     queryFn: async () => {
@@ -135,7 +155,6 @@ export default function AssistantPortal() {
     },
   });
 
-  // Loading & error states
   if (studentsLoading)
     return <p className="p-6 text-center text-muted-foreground">Loading assistant info...</p>;
   if (studentsError)
@@ -150,15 +169,14 @@ export default function AssistantPortal() {
       </div>
     );
 
-  // Filter manifests for today only
+  // Filter manifests for today
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayManifests = manifests.filter((m) => {
-    const manifestDate = new Date(m.date);
-    return manifestDate >= today && m.assistantId === assistantId && m.busId === bus?.id;
-  });
+  const todayManifests = manifests.filter(
+    (m) => new Date(m.date) >= today && m.assistantId === assistantId && m.busId === bus?.id
+  );
 
-  // Session-based stats
+  // Session stats
   const morningOnboarded = todayManifests.filter(
     (m) => m.session === "MORNING" && m.status === "CHECKED_IN"
   ).length;
@@ -174,6 +192,16 @@ export default function AssistantPortal() {
 
   const totalOnboarded = morningOnboarded + eveningOnboarded;
   const totalOffboarded = morningOffboarded + eveningOffboarded;
+
+  // Search & Pagination logic
+  const filteredStudents = assignedStudents.filter((s) =>
+    s.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const paginatedStudents = filteredStudents.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   return (
     <div className="min-h-screen bg-muted/30 p-6">
@@ -194,7 +222,6 @@ export default function AssistantPortal() {
 
         {/* Dashboard Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Morning */}
           <Card>
             <CardHeader>
               <CardTitle>Morning Session</CardTitle>
@@ -211,7 +238,6 @@ export default function AssistantPortal() {
             </CardContent>
           </Card>
 
-          {/* Evening */}
           <Card>
             <CardHeader>
               <CardTitle>Evening Session</CardTitle>
@@ -228,7 +254,6 @@ export default function AssistantPortal() {
             </CardContent>
           </Card>
 
-          {/* Total */}
           <Card>
             <CardHeader>
               <CardTitle>Total Summary</CardTitle>
@@ -270,7 +295,8 @@ export default function AssistantPortal() {
                   />
                   <Marker position={[busLocation.lat, busLocation.lng]}>
                     <Popup>
-                      {bus.name} ({bus.plateNumber})
+                      {bus.name} ({bus.plateNumber})<br />
+                      {busLocation.address}
                     </Popup>
                   </Marker>
                 </MapContainer>
@@ -287,7 +313,21 @@ export default function AssistantPortal() {
             <CardTitle>Student Manifest</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {assignedStudents.map((student) => {
+            {/* Search */}
+            <div className="mb-3">
+              <input
+                type="text"
+                placeholder="Search student..."
+                className="w-full p-2 border rounded"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1); // reset page on search
+                }}
+              />
+            </div>
+
+            {paginatedStudents.map((student) => {
               const morning = todayManifests.find(
                 (m) => m.studentId === student.id && m.session === "MORNING"
               );
@@ -305,8 +345,7 @@ export default function AssistantPortal() {
                     <p className="text-sm text-muted-foreground">{student.grade}</p>
                   </div>
 
-                  {/* Morning Controls */}
-                  <div className="flex items-center gap-3 mt-3 md:mt-0">
+                  <div className="flex flex-col md:flex-row items-center gap-3 mt-3 md:mt-0">
                     {morning && (
                       <Badge
                         className={`${
@@ -346,10 +385,7 @@ export default function AssistantPortal() {
                     >
                       Out (M)
                     </Button>
-                  </div>
 
-                  {/* Evening Controls */}
-                  <div className="flex items-center gap-3 mt-3 md:mt-0">
                     {evening && (
                       <Badge
                         className={`${
@@ -393,6 +429,29 @@ export default function AssistantPortal() {
                 </div>
               );
             })}
+
+            {/* Pagination */}
+            <div className="flex justify-center items-center gap-2 mt-4">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                disabled={currentPage === 1}
+              >
+                Prev
+              </Button>
+              <span>
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

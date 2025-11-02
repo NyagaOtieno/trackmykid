@@ -41,7 +41,14 @@ api.interceptors.response.use(
 // GET / FETCH Functions
 // ======================
 export const getStudents = () => api.get("/students").then((res) => res.data);
+
+// ✅ Fetch buses with expanded relations (driver, assistant, school)
+export const getBusesWithRelations = () =>
+  api.get("/buses?includeRelations=true").then((res) => res.data);
+
+// ✅ Simple buses list
 export const getBuses = () => api.get("/buses").then((res) => res.data);
+
 export const getManifests = () => api.get("/manifests").then((res) => res.data);
 
 // ✅ Tracking Routes
@@ -78,6 +85,9 @@ export const createBus = (data: any) => api.post("/buses", data);
 export const updateBus = (id: number, data: any) =>
   api.put(`/buses/${id}`, data);
 export const deleteBus = (id: number) => api.delete(`/buses/${id}`);
+
+// ✅ Explicit `addBus` function for AddBusForm.tsx
+export const addBus = (busData: any) => api.post("/buses", busData).then(res => res.data);
 
 // ---------- Schools ----------
 export const createSchool = (data: any) => api.post("/schools", data);

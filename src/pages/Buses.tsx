@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, Edit, Trash } from 'lucide-react';
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, Edit, Trash, Download } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -10,59 +10,111 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { getBuses, getAssistants } from '@/lib/api';
+} from "@/components/ui/table";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { getBuses, deleteBus } from "@/lib/api";
+import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import Papa from "papaparse";
+import AddBusForm from "@/pages/AddBusForm";
 
 export default function Buses() {
-  const [searchTerm, setSearchTerm] = useState('');
+  const queryClient = useQueryClient();
+
+  // State
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortConfig, setSortConfig] = useState({ key: "name", direction: "asc" });
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  const [selectedBus, setSelectedBus] = useState<any | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // Fetch Buses
-  const { data: busesData = [], isLoading: busesLoading, isError: busesError } = useQuery({
-    queryKey: ['buses'],
+  const {
+    data: buses = [],
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["buses"],
     queryFn: getBuses,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
 
-  // Fetch Bus Assistants
-  const { data: assistantsData = [], isLoading: assistantsLoading, isError: assistantsError } = useQuery({
-    queryKey: ['assistants'],
-    queryFn: getAssistants,
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteBus(id),
+    onSuccess: () => {
+      toast.success("Bus deleted successfully");
+      queryClient.invalidateQueries(["buses"]);
+    },
   });
 
-  const buses = Array.isArray(busesData) ? busesData : [];
-  const assistants = Array.isArray(assistantsData) ? assistantsData : [];
+  // Handle Sorting
+  const sortedBuses = useMemo(() => {
+    if (!buses) return [];
+    return [...buses].sort((a, b) => {
+      const valA = a[sortConfig.key];
+      const valB = b[sortConfig.key];
+      if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [buses, sortConfig]);
 
-  // Get assistant name by ID
-  const getAssistantName = (assistantId: number) => {
-    const assistant = assistants.find((a: any) => a.id === assistantId);
-    return assistant ? assistant.name : 'N/A';
-  };
-
-  // Handle Edit
-  const handleEdit = (busId: number) => {
-    console.log('Edit bus', busId);
-    // TODO: redirect to edit form or open modal
-  };
-
-  // Handle Delete
-  const handleDelete = (busId: number) => {
-    console.log('Delete bus', busId);
-    // TODO: call delete API and refetch buses
-  };
-
-  // Filter buses based on searchTerm
-  const filteredBuses = buses.filter((bus: any) => {
-    const driverName =
-      bus.driver && typeof bus.driver === 'object' ? bus.driver.name : bus.driver || '';
-    const assistantName = getAssistantName(bus.assistantId);
-
+  // Handle Filtering
+  const filteredBuses = sortedBuses.filter((bus) => {
+    const search = searchTerm.toLowerCase();
     return (
-      bus.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bus.plateNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bus.route.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      driverName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      assistantName.toLowerCase().includes(searchTerm.toLowerCase())
+      bus.name.toLowerCase().includes(search) ||
+      bus.plateNumber.toLowerCase().includes(search) ||
+      bus.route.toLowerCase().includes(search)
     );
   });
+
+  // Pagination
+  const paginatedBuses = filteredBuses.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+  const totalPages = Math.ceil(filteredBuses.length / itemsPerPage);
+
+  // Export Handlers
+  const handleExportCSV = () => {
+    const csv = Papa.unparse(buses);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "buses.csv";
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleExportExcel = () => {
+    const worksheet = XLSX.utils.json_to_sheet(buses);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Buses");
+    XLSX.writeFile(workbook, "buses.xlsx");
+  };
+
+  // UI Handlers
+  const handleSort = (key: string) => {
+    setSortConfig((prev) => ({
+      key,
+      direction: prev.direction === "asc" ? "desc" : "asc",
+    }));
+  };
+
+  const handleDelete = (id: number) => {
+    if (confirm("Are you sure you want to delete this bus?")) {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  const handleDialogOpen = (bus = null) => {
+    setSelectedBus(bus);
+    setIsDialogOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -72,23 +124,28 @@ export default function Buses() {
           <h2 className="text-3xl font-bold">Buses</h2>
           <p className="text-muted-foreground mt-1">Manage fleet and bus assignments</p>
         </div>
-        <Button>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Bus
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleExportCSV}>
+            <Download className="h-4 w-4 mr-2" /> CSV
+          </Button>
+          <Button variant="outline" onClick={handleExportExcel}>
+            <Download className="h-4 w-4 mr-2" /> Excel
+          </Button>
+          <Button onClick={() => handleDialogOpen()}>
+            <Plus className="h-4 w-4 mr-2" /> Add Bus
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search buses by name, plate, route, driver, assistant..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search buses..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
       </div>
 
       {/* Table */}
@@ -96,59 +153,53 @@ export default function Buses() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Plate Number</TableHead>
-              <TableHead>Route</TableHead>
-              <TableHead>Driver</TableHead>
-              <TableHead>Capacity</TableHead>
-              <TableHead>Bus Assistant</TableHead>
-              <TableHead>Status</TableHead>
+              {["Name", "Plate Number", "Route", "Capacity", "Status"].map((col) => (
+                <TableHead key={col} onClick={() => handleSort(col.toLowerCase())}>
+                  {col}{" "}
+                  {sortConfig.key === col.toLowerCase() &&
+                    (sortConfig.direction === "asc" ? "▲" : "▼")}
+                </TableHead>
+              ))}
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {busesLoading || assistantsLoading ? (
+            {isLoading ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8">
                   Loading...
                 </TableCell>
               </TableRow>
-            ) : busesError || assistantsError ? (
+            ) : isError ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8 text-red-500">
-                  Failed to load data. Please try again later.
+                  Failed to load buses
                 </TableCell>
               </TableRow>
-            ) : filteredBuses.length === 0 ? (
+            ) : paginatedBuses.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8">
                   No buses found
                 </TableCell>
               </TableRow>
             ) : (
-              filteredBuses.map((bus: any) => (
+              paginatedBuses.map((bus) => (
                 <TableRow key={bus.id}>
                   <TableCell className="font-medium">{bus.name}</TableCell>
                   <TableCell>{bus.plateNumber}</TableCell>
                   <TableCell>{bus.route}</TableCell>
-                  <TableCell>
-                    {bus.driver && typeof bus.driver === 'object'
-                      ? bus.driver.name
-                      : bus.driver || 'N/A'}
-                  </TableCell>
                   <TableCell>{bus.capacity}</TableCell>
-                  <TableCell>{getAssistantName(bus.assistantId)}</TableCell>
                   <TableCell>
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        bus.isMoving ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'
+                        bus.isMoving ? "bg-red-500/10 text-red-500" : "bg-green-500/10 text-green-500"
                       }`}
                     >
-                      {bus.isMoving ? 'Moving' : 'Stopped'}
+                      {bus.isMoving ? "Moving" : "Stopped"}
                     </span>
                   </TableCell>
                   <TableCell className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => handleEdit(bus.id)}>
+                    <Button size="sm" variant="outline" onClick={() => handleDialogOpen(bus)}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => handleDelete(bus.id)}>
@@ -161,6 +212,41 @@ export default function Buses() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Pagination */}
+      <div className="flex justify-between items-center mt-4">
+        <span>
+          Page {currentPage} of {totalPages}
+        </span>
+        <div className="flex gap-2">
+          <Button disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>
+            First
+          </Button>
+          <Button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
+            Prev
+          </Button>
+          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>
+            Next
+          </Button>
+          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>
+            Last
+          </Button>
+        </div>
+      </div>
+
+      {/* Dialog for Add/Edit */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogTrigger asChild></DialogTrigger>
+        <DialogContent className="max-w-lg">
+          <AddBusForm
+            bus={selectedBus}
+            onSuccess={() => {
+              queryClient.invalidateQueries(["buses"]);
+              setIsDialogOpen(false);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

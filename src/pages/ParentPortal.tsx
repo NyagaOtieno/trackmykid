@@ -32,14 +32,14 @@ export default function ParentPortal() {
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
 
-  // ✅ Logout handler
+  // Logout
   const handleLogout = () => {
     localStorage.removeItem("parent");
     localStorage.removeItem("token");
     navigate("/");
   };
 
-  // ✅ Fetch students
+  // Fetch students
   const { data: rawStudents, isLoading: loadingStudents } = useQuery({
     queryKey: ["students"],
     queryFn: getStudents,
@@ -47,81 +47,56 @@ export default function ParentPortal() {
 
   const students = Array.isArray(rawStudents?.data) ? rawStudents.data : [];
 
-  // ✅ Filter children by logged-in parent
+  // Filter children by logged-in parent
   const myStudents = students.filter(
     (s: any) => s.parent?.user?.id === parentUserId
   );
 
-  // ✅ Fetch live bus locations directly from Track-Loc8 API
-  const { data: rawFleetData, isLoading: loadingLocations } = useQuery({
-    queryKey: ["fleetLocations"],
-    queryFn: async () => {
-      const response = await fetch(
-        "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6"
-      );
-      const data = await response.json();
-      return data?.data?.units || [];
-    },
-    refetchInterval: 30000, // every 30 seconds
-  });
-
-  const allFleetUnits: any[] = Array.isArray(rawFleetData) ? rawFleetData : [];
-
-  // ✅ Map student's bus info
-  const myBuses = myStudents
-    .filter((s: any) => s.bus)
-    .map((s: any) => ({
-      id: s.bus.id,
-      plateNumber: s.bus.plateNumber?.toLowerCase(),
-      name: s.bus.name?.toLowerCase(),
-    }));
-
-  // ✅ Match buses by plate number (Track-Loc8 uses "number")
-  const myBusLocations = allFleetUnits
-    .filter((unit) =>
-      myBuses.some(
-        (b) =>
-          b.plateNumber &&
-          unit.number &&
-          b.plateNumber === unit.number.toLowerCase()
-      )
-    )
-    .filter((loc) => loc.lat != null && loc.lng != null);
-
-  // ✅ Reverse geocoded addresses (OpenStreetMap)
-  const [addressCache, setAddressCache] = useState<Record<string, string>>({});
+  // ✅ Fetch student live location from our backend
+  const [studentLocations, setStudentLocations] = useState<
+    Record<number, { lat: number; lon: number; status: string }>
+  >({});
 
   useEffect(() => {
-    const fetchAddresses = async () => {
-      for (const loc of myBusLocations) {
-        const key = `${loc.lat},${loc.lng}`;
-        if (addressCache[key]) continue;
-
+    const fetchLocations = async () => {
+      for (const student of myStudents) {
         try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}`
+          const res = await fetch(
+            `/api/tracking/student/${student.id}`
           );
-          const data = await response.json();
-          const address = data.display_name || "Unknown location";
-          setAddressCache((prev) => ({ ...prev, [key]: address }));
-        } catch {
-          setAddressCache((prev) => ({
-            ...prev,
-            [key]: "Address unavailable",
-          }));
+          const data = await res.json();
+          if (data.location) {
+            setStudentLocations((prev) => ({
+              ...prev,
+              [student.id]: {
+                lat: data.location.lat,
+                lon: data.location.lon,
+                status: data.status,
+              },
+            }));
+          } else {
+            setStudentLocations((prev) => ({
+              ...prev,
+              [student.id]: { lat: 0, lon: 0, status: data.status },
+            }));
+          }
+        } catch (err) {
+          console.error("Error fetching student location:", err);
         }
       }
     };
 
-    if (myBusLocations.length > 0) fetchAddresses();
-  }, [myBusLocations]);
+    if (myStudents.length > 0) {
+      fetchLocations();
+      const interval = setInterval(fetchLocations, 30000); // refresh every 30s
+      return () => clearInterval(interval);
+    }
+  }, [myStudents]);
 
-  // ✅ Map center
+  // Map center
   const center =
-    myBusLocations.length > 0
-      ? [myBusLocations[0].lat, myBusLocations[0].lng]
-      : myStudents.length > 0
-      ? [myStudents[0].latitude, myStudents[0].longitude]
+    Object.values(studentLocations).length > 0
+      ? [Object.values(studentLocations)[0].lat, Object.values(studentLocations)[0].lon]
       : [-1.2921, 36.8219]; // Default: Nairobi
 
   return (
@@ -147,13 +122,13 @@ export default function ParentPortal() {
         </div>
       </header>
 
-      {/* MAIN CONTENT */}
+      {/* MAIN */}
       <main className="max-w-7xl mx-auto p-6 space-y-6">
         {/* CHILDREN SECTION */}
         <div>
           <h2 className="text-2xl font-bold">My Children</h2>
           <p className="text-muted-foreground">
-            Track your children’s assigned buses and real-time status.
+            Track your children’s location during school trips.
           </p>
         </div>
 
@@ -169,95 +144,75 @@ export default function ParentPortal() {
               </CardContent>
             </Card>
           ) : (
-            myStudents.map((student: any) => (
-              <Card key={student.id}>
-                <CardHeader>
-                  <CardTitle>{student.name}</CardTitle>
-                  <CardDescription>{student.grade || "N/A"}</CardDescription>
-                  <p className="text-sm text-muted-foreground">
-                    School: {student.school?.name || "Not Assigned"}
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Bus className="h-4 w-4 text-primary" />
-                    <span className="text-sm">
-                      {student.bus?.name || "No Bus Assigned"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-accent" />
-                    <span className="text-sm">
-                      {student.bus?.plateNumber || "N/A"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Route</span>
-                    <span className="text-xs">
-                      {student.bus?.route || "Not Set"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+            myStudents.map((student: any) => {
+              const loc = studentLocations[student.id];
+              return (
+                <Card key={student.id}>
+                  <CardHeader>
+                    <CardTitle>{student.name}</CardTitle>
+                    <CardDescription>{student.grade || "N/A"}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Bus className="h-4 w-4 text-primary" />
+                      <span className="text-sm">
+                        {student.bus?.name || "No Bus Assigned"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-accent" />
+                      <span className="text-sm">
+                        {loc && loc.status === "On trip"
+                          ? `Lat: ${loc.lat}, Lon: ${loc.lon}`
+                          : loc?.status || "Not onboarded"}
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </div>
 
-        {/* LIVE BUS MAP */}
+        {/* LIVE MAP */}
         <Card>
           <CardHeader>
             <CardTitle>Live Bus Tracking</CardTitle>
-            <CardDescription>
-              See live movement of buses assigned to your children.
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[500px] rounded-lg overflow-hidden">
-              {loadingLocations ? (
-                <p className="text-center text-muted-foreground">
-                  Loading locations...
-                </p>
-              ) : myBusLocations.length === 0 ? (
-                <div className="h-full flex items-center justify-center bg-muted">
-                  <p className="text-muted-foreground">
-                    No live bus data available right now.
-                  </p>
-                </div>
-              ) : (
-                <MapContainer
-                  key="parent-map"
-                  center={center as [number, number]}
-                  zoom={13}
-                  style={{ height: "100%", width: "100%" }}
-                >
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  {myBusLocations.map((loc: any) => {
-                    const key = `${loc.lat},${loc.lng}`;
-                    const address = addressCache[key] || "Fetching address...";
-                    return (
-                      <Marker key={loc.unit_id} position={[loc.lat, loc.lng]} icon={busIcon}>
-                        <Popup>
-                          <div className="p-2">
-                            <h3 className="font-bold">
-                              {loc.number || "Unknown Bus"}
-                            </h3>
-                            <p className="text-xs mt-1">{address}</p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Updated:{" "}
-                              {loc.last_update
-                                ? new Date(loc.last_update).toLocaleTimeString()
-                                : "N/A"}
-                            </p>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
-                </MapContainer>
-              )}
+              <MapContainer
+                key="parent-map"
+                center={center as [number, number]}
+                zoom={13}
+                style={{ height: "100%", width: "100%" }}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                {Object.entries(studentLocations).map(([id, loc]) => {
+                  if (loc.status !== "On trip") return null;
+                  return (
+                    <Marker
+                      key={id}
+                      position={[loc.lat, loc.lon]}
+                      icon={busIcon}
+                    >
+                      <Popup>
+                        <div className="p-2">
+                          <h3 className="font-bold">
+                            {myStudents.find((s) => s.id === Number(id))?.bus?.name || "Bus"}
+                          </h3>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Status: {loc.status}
+                          </p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+              </MapContainer>
             </div>
           </CardContent>
         </Card>

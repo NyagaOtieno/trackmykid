@@ -15,9 +15,10 @@ import Drivers from "./pages/Drivers";
 import Parents from "./pages/Parents";
 import ParentPortal from "./pages/ParentPortal";
 import DriverPortal from "./pages/DriverPortal";
-import AssistantPortal from "./pages/AssistantPortal"; // ✅ use portal now
+import AssistantPortal from "./pages/AssistantPortal";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import AddBusPage from "./pages/AddBusForm"; // ✅ Import new Add Bus page
 
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { DashboardLayout } from "./components/DashboardLayout";
@@ -31,16 +32,25 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
+          {/* Public Route */}
           <Route path="/" element={<Login />} />
+
+          {/* Protected Routes */}
           <Route element={<ProtectedRoute />}>
+            {/* Role-Based Portals */}
             <Route path="/parent-portal" element={<ParentPortal />} />
             <Route path="/driver-portal" element={<DriverPortal />} />
-            <Route path="/assistant-portal" element={<AssistantPortal />} /> {/* ✅ replaced */}
+            <Route path="/assistant-portal" element={<AssistantPortal />} />
 
+            {/* Admin Dashboard Layout */}
             <Route element={<DashboardLayout />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/students" element={<Students />} />
+
+              {/* Bus Management */}
               <Route path="/buses" element={<Buses />} />
+              <Route path="/buses/add" element={<AddBusPage />} /> {/* ✅ Add Bus route */}
+
               <Route path="/tracking" element={<Tracking />} />
               <Route path="/manifests" element={<Manifests />} />
               <Route path="/assistants" element={<Assistants />} />
@@ -49,6 +59,8 @@ const App = () => (
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>
+
+          {/* Catch-All */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
