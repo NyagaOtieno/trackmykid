@@ -10,20 +10,20 @@ const PORT = process.env.PORT || 8080;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ Use history fallback BEFORE static middleware
+// Use history middleware BEFORE static file middleware
 app.use(
   history({
-    // Optional: only rewrite non-API requests
     rewrites: [
-      { from: /^\/$/, to: "/index.html" },
-      { from: /^\/.*$/, to: "/index.html" },
+      { from: /^\/$/, to: "/index.html" },  // Handle root route
+      { from: /^\/.*$/, to: "/index.html" },  // Handle all other routes
     ],
   })
 );
 
-// ✅ Serve static files from Vite build
+// Serve static files from Vite build
 app.use(express.static(path.join(__dirname, "dist")));
 
+// Start server
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
