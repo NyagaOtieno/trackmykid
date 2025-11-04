@@ -11,6 +11,6 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: "dist"
-  }
+    outDir: "dist", // This must match vercel.json
+  },
 });
