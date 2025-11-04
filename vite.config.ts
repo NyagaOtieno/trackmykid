@@ -3,15 +3,19 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 export default defineConfig({
-  base: "./", // ✅ relative paths for Vercel
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src")
+      "@": path.resolve(__dirname, "./src"),
     },
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true,
+    rollupOptions: {
+      input: path.resolve(__dirname, "public/index.html"),
+    },
+  },
+  server: {
+    port: 8080,
   },
 });
