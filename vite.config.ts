@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 export default defineConfig({
-  base: "./", // use relative paths
+  base: "./", // important for Vercel relative paths
   plugins: [react()],
   resolve: {
     alias: {
