@@ -5,27 +5,19 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Node",
-    "allowJs": true,
-    "checkJs": false,
+    "allowJs": false,
     "strict": true,
-    "noImplicitAny": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
-    },
-    "allowSyntheticDefaultImports": true
+      "@/*": ["src/*"]
+    }
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "exclude": ["node_modules", "dist"]
 }

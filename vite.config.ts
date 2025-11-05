@@ -4,18 +4,19 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
-  root: ".",                // project root
-  base: "./",               // relative paths for Vercel
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"), // allows import like "@/components/..."
+      "@": path.resolve(__dirname, "./src"), // Enables "@/components/..."
     },
   },
+  server: {
+    open: true, // Automatically opens the browser on npm run dev
+  },
   build: {
-    outDir: "dist",         // production build folder
-    emptyOutDir: true,
+    outDir: "dist",          // Output directory for build
+    emptyOutDir: true,       // Clears old builds
     rollupOptions: {
-      input: path.resolve(__dirname, "public/index.html"), // ensures correct HTML entry
+      input: path.resolve(__dirname, "index.html"), // Root index.html for SPA
     },
   },
 });
