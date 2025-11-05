@@ -4,14 +4,13 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
-   base: './',
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src")
-    }
-  }
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
 });
