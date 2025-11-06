@@ -1,3 +1,6 @@
+// 🔧 Full code with Loc8 integration for vehicle mapping
+// ParentPortal.tsx 
+
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Bus } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
@@ -9,112 +12,356 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
-import { getStudents } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
-// ✅ Custom green bus marker icon
-const busIcon = L.icon({
-  iconUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
+/* ---------------- Bus Icon ---------------- */
+const busIcon = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
 });
+
+/* ---------------- API ENDPOINTS ---------------- */
+const STUDENTS_ENDPOINT =
+  "https://schooltransport-production.up.railway.app/api/students";
+const MANIFESTS_ENDPOINT =
+  "https://schooltransport-production.up.railway.app/api/manifests";
+const BUSES_ENDPOINT =
+  "https://schooltransport-production.up.railway.app/api/buses";
+const USERS_ENDPOINT =
+  "https://schooltransport-production.up.railway.app/api/users";
+// Loc8 (live fleet) endpoint
+const LOC8_UNITS_ENDPOINT =
+  "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6";
+
+/* ---------------- TYPES ---------------- */
+type Student = any;
+type Manifest = {
+  id: number;
+  studentId: number;
+  busId?: number | null;
+  assistantId?: number | null;
+  date?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  boardingTime?: string | null;
+  alightingTime?: string | null;
+  status?: string | null;
+  session?: string | null;
+  student?: any;
+  bus?: any;
+  assistant?: any;
+};
+
+type BusItem = {
+  id: number;
+  name?: string;
+  plateNumber?: string;
+  driverId?: number | null;
+  assistantId?: number | null;
+  route?: string | null;
+  driver?: any | null;
+  assistant?: any | null;
+};
+
+type UserItem = {
+  id: number;
+  name?: string;
+  role?: string;
+  phone?: string | null;
+};
+
+type Loc8UnitRaw = {
+  unit_id?: number;
+  number?: string | null; // vehicle name, i.e "API Test"
+  label?: string | null; // fallback if number empty
+  lat?: number | null;
+  lng?: number | null;
+  last_update?: string | null;
+  [k: string]: any;
+};
 
 export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
 
-  // Logout
   const handleLogout = () => {
     localStorage.removeItem("parent");
     localStorage.removeItem("token");
     navigate("/");
   };
 
-  // Fetch students
-  const { data: rawStudents, isLoading: loadingStudents } = useQuery({
+  /* ---------------- FETCH STUDENTS ---------------- */
+  const { data: studentsData, isLoading: loadingStudents } = useQuery({
     queryKey: ["students"],
-    queryFn: getStudents,
+    queryFn: async () => {
+      const res = await fetch(STUDENTS_ENDPOINT);
+      if (!res.ok) throw new Error("Failed to fetch students");
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json?.data)) return json.data;
+      return [];
+    },
+    refetchInterval: 15000,
   });
 
-  const students = Array.isArray(rawStudents?.data) ? rawStudents.data : [];
+  const students: Student[] = Array.isArray(studentsData) ? studentsData : [];
 
-  // Filter children by logged-in parent
-  const myStudents = students.filter(
-    (s: any) => s.parent?.user?.id === parentUserId
+  const myStudents = students.filter((s: any) =>
+    Boolean(
+      (s.parent?.user?.id && s.parent?.user?.id === parentUserId) ||
+        (s.parentId && s.parentId === parentUserId)
+    )
   );
 
-  // ✅ Fetch student live location from our backend
-  const [studentLocations, setStudentLocations] = useState<
-    Record<number, { lat: number; lon: number; status: string }>
-  >({});
+  /* ---------------- FETCH MANIFESTS ---------------- */
+  const { data: manifestsData } = useQuery<Manifest[]>({
+    queryKey: ["manifests", parentUserId],
+    queryFn: async () => {
+      const res = await fetch(MANIFESTS_ENDPOINT);
+      if (!res.ok) throw new Error("Failed to fetch manifests");
+      const json = await res.json();
+      const arr = Array.isArray(json)
+        ? json
+        : Array.isArray(json?.data)
+        ? json.data
+        : [];
+      return arr;
+    },
+    refetchInterval: 15000,
+    keepPreviousData: true,
+  });
 
-  useEffect(() => {
-    const fetchLocations = async () => {
-      for (const student of myStudents) {
-        try {
-          const res = await fetch(
-            `/api/tracking/student/${student.id}`
-          );
-          const data = await res.json();
-          if (data.location) {
-            setStudentLocations((prev) => ({
-              ...prev,
-              [student.id]: {
-                lat: data.location.lat,
-                lon: data.location.lon,
-                status: data.status,
-              },
-            }));
-          } else {
-            setStudentLocations((prev) => ({
-              ...prev,
-              [student.id]: { lat: 0, lon: 0, status: data.status },
-            }));
-          }
-        } catch (err) {
-          console.error("Error fetching student location:", err);
-        }
-      }
-    };
+  const manifests: Manifest[] = Array.isArray(manifestsData)
+    ? manifestsData
+    : [];
 
-    if (myStudents.length > 0) {
-      fetchLocations();
-      const interval = setInterval(fetchLocations, 30000); // refresh every 30s
-      return () => clearInterval(interval);
+  /* ---------------- FETCH BUSES ---------------- */
+  const { data: busesData } = useQuery<BusItem[]>({
+    queryKey: ["buses"],
+    queryFn: async () => {
+      const res = await fetch(BUSES_ENDPOINT);
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json?.data)) return json.data;
+      return [];
+    },
+    refetchInterval: 30000,
+  });
+  const buses: BusItem[] = Array.isArray(busesData) ? busesData : [];
+
+  /* ---------------- FETCH USERS ---------------- */
+  const { data: usersData } = useQuery<UserItem[]>({
+    queryKey: ["users"],
+    queryFn: async () => {
+      const res = await fetch(USERS_ENDPOINT);
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json?.data)) return json.data;
+      return [];
+    },
+    refetchInterval: 30000,
+  });
+  const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
+
+  /* ---------------- FETCH LOC8 UNITS ---------------- */
+  const { data: loc8Raw } = useQuery({
+    queryKey: ["loc8Units"],
+    queryFn: async () => {
+      const res = await fetch(LOC8_UNITS_ENDPOINT);
+      if (!res.ok) return [];
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json?.data)) return json.data;
+      if (Array.isArray(json?.data?.units)) return json.data.units;
+      return [];
+    },
+    refetchInterval: 15000,
+  });
+
+  const loc8Units: Loc8UnitRaw[] = Array.isArray(loc8Raw) ? loc8Raw : [];
+
+  /* ---------------- BUILD LOOKUP MAPS ---------------- */
+  const busesById = useMemo(() => {
+    const map = new Map<number, BusItem>();
+    for (const b of buses) {
+      if (b?.id != null) map.set(Number(b.id), b);
     }
-  }, [myStudents]);
+    return map;
+  }, [buses]);
 
-  // Map center
-  const center =
-    Object.values(studentLocations).length > 0
-      ? [Object.values(studentLocations)[0].lat, Object.values(studentLocations)[0].lon]
-      : [-1.2921, 36.8219]; // Default: Nairobi
+  const usersById = useMemo(() => {
+    const map = new Map<number, UserItem>();
+    for (const u of users) {
+      if (u?.id != null) map.set(Number(u.id), u);
+    }
+    return map;
+  }, [users]);
+
+  /* 🔥 Loc8 lookup: sanitize number/label to match plateNumber in db */
+  const loc8ByPlate = useMemo(() => {
+    const map = new Map<string, Loc8UnitRaw>();
+    for (const u of loc8Units) {
+      const rawPlate = (u.number ?? u.label ?? "").toString().trim();
+      const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase(); // e.g. "APITEST"
+      if (plateKey) map.set(plateKey, u);
+    }
+    return map;
+  }, [loc8Units]);
+
+  const latestManifestByStudent = useMemo(() => {
+    const map = new Map<number, Manifest>();
+    const sorted = manifests
+      .slice()
+      .sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        return db - da;
+      });
+    for (const m of sorted) {
+      const sid = m.studentId ?? m.student?.id;
+      if (sid && !map.has(sid)) map.set(sid, m);
+    }
+    return map;
+  }, [manifests]);
+
+  type StudentView = {
+    student: Student;
+    manifest?: Manifest | undefined;
+    status: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN";
+    lat?: number;
+    lon?: number;
+    readableLocation: string;
+    busName?: string;
+    plate?: string;
+    driver?: string;
+    assistant?: string;
+    lastSeen?: string;
+    liveSource?: "loc8" | "manifest" | "student";
+  };
+
+  const studentViews: StudentView[] = myStudents.map((s: any) => {
+    const latest = latestManifestByStudent.get(s.id);
+    const busCandidate =
+      latest?.bus ??
+      s.bus ??
+      (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined) ??
+      (typeof s.busId === "number" ? busesById.get(Number(s.busId)) : undefined);
+
+    const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
+    const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase();
+
+    let lat = Number(s.latitude ?? s.lat ?? 0) || undefined;
+    let lon = Number(s.longitude ?? s.lng ?? s.lon ?? 0) || undefined;
+    let readableLocation = "Location unavailable";
+    let liveSource: StudentView["liveSource"] = "student";
+    let lastSeen: string | undefined = undefined;
+
+    /* 🔥 Live GPS Matching via Loc8 */
+    const loc8Match = loc8ByPlate.get(plateKey);
+
+    if (loc8Match) {
+      const foundLat = Number(loc8Match.lat);
+      const foundLng = Number(loc8Match.lng);
+      if (!isNaN(foundLat) && !isNaN(foundLng)) {
+        lat = foundLat;
+        lon = foundLng;
+      }
+      lastSeen = loc8Match.last_update ?? undefined;
+      readableLocation = loc8Match.number ?? loc8Match.label ?? rawPlate ?? "Live location";
+      liveSource = "loc8";
+    }
+
+    // Fallback to manifest location
+    if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
+      lat = Number(latest.latitude);
+      lon = Number(latest.longitude);
+      readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
+      liveSource = "manifest";
+    }
+
+    // Fallback to student last known
+    if ((!lat || !lon) && (s.latitude != null || s.longitude != null)) {
+      lat = Number(s.latitude ?? s.lat ?? 0);
+      lon = Number(s.longitude ?? s.lng ?? s.lon ?? 0);
+      readableLocation = "Student location";
+      liveSource = "student";
+    }
+
+    const driverFromBus = busCandidate?.driver ?? undefined;
+    const assistantFromBus = busCandidate?.assistant ?? undefined;
+    const driverId = busCandidate?.driverId ?? null;
+    const assistantId = busCandidate?.assistantId ?? null;
+
+    const driverName =
+      driverFromBus?.name ??
+      (driverId != null ? usersById.get(Number(driverId))?.name : undefined) ??
+      "N/A";
+    const assistantName =
+      assistantFromBus?.name ??
+      (assistantId != null ? usersById.get(Number(assistantId))?.name : undefined) ??
+      "N/A";
+
+    let status: StudentView["status"] = "UNKNOWN";
+    if (latest?.status) {
+      const st = (latest.status ?? "").toString().toUpperCase();
+      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
+      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
+    } else {
+      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
+      else if (latest?.alightingTime) status = "CHECKED_OUT";
+    }
+
+    const lastSeenReadable =
+      lastSeen != null ? new Date(lastSeen).toLocaleString() : undefined;
+
+    return {
+      student: s,
+      manifest: latest,
+      status,
+      lat,
+      lon,
+      readableLocation:
+        readableLocation || busCandidate?.route || busCandidate?.name || "Unknown",
+      busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
+      plate: rawPlate || "N/A",
+      driver: driverName,
+      assistant: assistantName,
+      lastSeen: lastSeenReadable,
+      liveSource,
+    };
+  });
+
+  const chosen = studentViews.find((v) => v.status === "CHECKED_IN" && v.lat && v.lon) ?? studentViews.find((v) => v.lat && v.lon);
+  const center: [number, number] = chosen && chosen.lat && chosen.lon ? [Number(chosen.lat), Number(chosen.lon)] : [-1.2921, 36.8219];
+
+  const fmt = (iso?: string | null) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  };
 
   return (
     <div className="min-h-screen bg-muted/30">
-      {/* HEADER */}
       <header className="bg-card border-b p-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bus className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-bold">Parent Portal</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              Welcome, {currentUser?.name || "Parent"}
+          <div>
+            <span className="mr-4 text-sm text-muted-foreground">
+              Welcome, {currentUser?.name}
             </span>
             <button
               onClick={handleLogout}
-              className="px-3 py-1 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+              className="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600"
             >
               Logout
             </button>
@@ -122,50 +369,69 @@ export default function ParentPortal() {
         </div>
       </header>
 
-      {/* MAIN */}
       <main className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* CHILDREN SECTION */}
         <div>
           <h2 className="text-2xl font-bold">My Children</h2>
-          <p className="text-muted-foreground">
-            Track your children’s location during school trips.
+          <p className="text-sm text-muted-foreground">
+            Track your children's current bus status and live location.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {loadingStudents ? (
-            <p className="text-center col-span-full text-muted-foreground">
-              Loading children...
+            <p className="col-span-full text-center text-muted-foreground">
+              Loading student data...
             </p>
-          ) : myStudents.length === 0 ? (
-            <Card className="col-span-full">
-              <CardContent className="py-8 text-center text-muted-foreground">
-                No children found for your account.
-              </CardContent>
+          ) : studentViews.length === 0 ? (
+            <Card className="col-span-full text-center py-8 text-muted-foreground">
+              No students found for your account.
             </Card>
           ) : (
-            myStudents.map((student: any) => {
-              const loc = studentLocations[student.id];
+            studentViews.map((v) => {
+              const s = v.student;
+              const manifest = v.manifest;
+              const statusLabel =
+                v.status === "CHECKED_IN"
+                  ? "Boarded (On Bus)"
+                  : v.status === "CHECKED_OUT"
+                  ? "Offboarded (Checked Out)"
+                  : "Not Onboarded";
+
               return (
-                <Card key={student.id}>
+                <Card key={s.id}>
                   <CardHeader>
-                    <CardTitle>{student.name}</CardTitle>
-                    <CardDescription>{student.grade || "N/A"}</CardDescription>
+                    <CardTitle>{s.name}</CardTitle>
+                    <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex gap-2">
                       <Bus className="h-4 w-4 text-primary" />
-                      <span className="text-sm">
-                        {student.bus?.name || "No Bus Assigned"}
-                      </span>
+                      <div>
+                        <div>{v.busName}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Plate: {v.plate}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    <div className="flex gap-2">
                       <MapPin className="h-4 w-4 text-accent" />
-                      <span className="text-sm">
-                        {loc && loc.status === "On trip"
-                          ? `Lat: ${loc.lat}, Lon: ${loc.lon}`
-                          : loc?.status || "Not onboarded"}
-                      </span>
+                      <div>
+                        <div>{statusLabel}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {v.readableLocation}
+                          {v.lastSeen ? ` — last seen: ${v.lastSeen}` : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground space-y-1 mt-3">
+                      <p>Driver: {v.driver ?? "N/A"}</p>
+                      <p>Assistant: {v.assistant ?? "N/A"}</p>
+                      <p>
+                        Boarding: {fmt(manifest?.boardingTime)}
+                        {" | "}Alighting: {fmt(manifest?.alightingTime)}
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -174,48 +440,36 @@ export default function ParentPortal() {
           )}
         </div>
 
-        {/* LIVE MAP */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Live Bus Tracking</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[500px] rounded-lg overflow-hidden">
-              <MapContainer
-                key="parent-map"
-                center={center as [number, number]}
-                zoom={13}
-                style={{ height: "100%", width: "100%" }}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                {Object.entries(studentLocations).map(([id, loc]) => {
-                  if (loc.status !== "On trip") return null;
-                  return (
-                    <Marker
-                      key={id}
-                      position={[loc.lat, loc.lon]}
-                      icon={busIcon}
-                    >
-                      <Popup>
-                        <div className="p-2">
-                          <h3 className="font-bold">
-                            {myStudents.find((s) => s.id === Number(id))?.bus?.name || "Bus"}
-                          </h3>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Status: {loc.status}
-                          </p>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })}
-              </MapContainer>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="h-[500px]">
+          <MapContainer
+            center={center}
+            zoom={12}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {studentViews
+              .filter((v) => v.lat && v.lon)
+              .map((v) => (
+                <Marker
+                  key={v.student.id}
+                  position={[Number(v.lat), Number(v.lon)]}
+                  icon={busIcon}
+                >
+                  <Popup>
+                    <div className="space-y-1">
+                      <strong>{v.student.name}</strong>
+                      <div>{v.busName} — {v.plate}</div>
+                      <div>{v.readableLocation}</div>
+                      <div>Driver: {v.driver}</div>
+                      <div>Assistant: {v.assistant}</div>
+                      <div>Status: {v.status}</div>
+                      {v.lastSeen && <div>Last Seen: {v.lastSeen}</div>}
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+          </MapContainer>
+        </div>
       </main>
     </div>
   );
