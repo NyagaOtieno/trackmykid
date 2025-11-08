@@ -1,9 +1,7 @@
-// 🔧 Full code with Loc8 integration for vehicle mapping
-// ParentPortal.tsx 
-
+// ParentPortal.tsx
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, Bus } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import {
   Card,
   CardContent,
@@ -15,14 +13,38 @@ import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
 
-/* ---------------- Bus Icon ---------------- */
-const busIcon = new L.Icon({
+/* ---------------- Bus Icons ---------------- */
+const busIconGreen = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
   iconSize: [32, 32],
   iconAnchor: [16, 32],
+  className: "filter-green-500",
 });
+
+const busIconRed = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+  className: "filter-red-500",
+});
+
+const busIconGray = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+  className: "filter-gray-500",
+});
+
+/* ---------------- Auto-fit map bounds component ---------------- */
+function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
+  }, [bounds, map]);
+  return null;
+}
 
 /* ---------------- API ENDPOINTS ---------------- */
 const STUDENTS_ENDPOINT =
@@ -33,7 +55,6 @@ const BUSES_ENDPOINT =
   "https://schooltransport-production.up.railway.app/api/buses";
 const USERS_ENDPOINT =
   "https://schooltransport-production.up.railway.app/api/users";
-// Loc8 (live fleet) endpoint
 const LOC8_UNITS_ENDPOINT =
   "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6";
 
@@ -76,8 +97,8 @@ type UserItem = {
 
 type Loc8UnitRaw = {
   unit_id?: number;
-  number?: string | null; // vehicle name, i.e "API Test"
-  label?: string | null; // fallback if number empty
+  number?: string | null;
+  label?: string | null;
   lat?: number | null;
   lng?: number | null;
   last_update?: string | null;
@@ -95,82 +116,61 @@ export default function ParentPortal() {
     navigate("/");
   };
 
-  /* ---------------- FETCH STUDENTS ---------------- */
+  /* ---------------- FETCH DATA ---------------- */
   const { data: studentsData, isLoading: loadingStudents } = useQuery({
     queryKey: ["students"],
     queryFn: async () => {
       const res = await fetch(STUDENTS_ENDPOINT);
       if (!res.ok) throw new Error("Failed to fetch students");
       const json = await res.json();
-      if (Array.isArray(json)) return json;
-      if (Array.isArray(json?.data)) return json.data;
-      return [];
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 15000,
   });
-
   const students: Student[] = Array.isArray(studentsData) ? studentsData : [];
-
-  const myStudents = students.filter((s: any) =>
-    Boolean(
+  const myStudents = students.filter(
+    (s: any) =>
       (s.parent?.user?.id && s.parent?.user?.id === parentUserId) ||
-        (s.parentId && s.parentId === parentUserId)
-    )
+      (s.parentId && s.parentId === parentUserId)
   );
 
-  /* ---------------- FETCH MANIFESTS ---------------- */
   const { data: manifestsData } = useQuery<Manifest[]>({
     queryKey: ["manifests", parentUserId],
     queryFn: async () => {
       const res = await fetch(MANIFESTS_ENDPOINT);
       if (!res.ok) throw new Error("Failed to fetch manifests");
       const json = await res.json();
-      const arr = Array.isArray(json)
-        ? json
-        : Array.isArray(json?.data)
-        ? json.data
-        : [];
-      return arr;
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 15000,
     keepPreviousData: true,
   });
+  const manifests: Manifest[] = Array.isArray(manifestsData) ? manifestsData : [];
 
-  const manifests: Manifest[] = Array.isArray(manifestsData)
-    ? manifestsData
-    : [];
-
-  /* ---------------- FETCH BUSES ---------------- */
   const { data: busesData } = useQuery<BusItem[]>({
     queryKey: ["buses"],
     queryFn: async () => {
       const res = await fetch(BUSES_ENDPOINT);
       if (!res.ok) return [];
       const json = await res.json();
-      if (Array.isArray(json)) return json;
-      if (Array.isArray(json?.data)) return json.data;
-      return [];
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 30000,
   });
   const buses: BusItem[] = Array.isArray(busesData) ? busesData : [];
 
-  /* ---------------- FETCH USERS ---------------- */
   const { data: usersData } = useQuery<UserItem[]>({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await fetch(USERS_ENDPOINT);
       if (!res.ok) return [];
       const json = await res.json();
-      if (Array.isArray(json)) return json;
-      if (Array.isArray(json?.data)) return json.data;
-      return [];
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 30000,
   });
   const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 
-  /* ---------------- FETCH LOC8 UNITS ---------------- */
   const { data: loc8Raw } = useQuery({
     queryKey: ["loc8Units"],
     queryFn: async () => {
@@ -184,32 +184,26 @@ export default function ParentPortal() {
     },
     refetchInterval: 15000,
   });
-
   const loc8Units: Loc8UnitRaw[] = Array.isArray(loc8Raw) ? loc8Raw : [];
 
-  /* ---------------- BUILD LOOKUP MAPS ---------------- */
+  /* ---------------- HELPER MAPS ---------------- */
   const busesById = useMemo(() => {
     const map = new Map<number, BusItem>();
-    for (const b of buses) {
-      if (b?.id != null) map.set(Number(b.id), b);
-    }
+    for (const b of buses) if (b?.id != null) map.set(Number(b.id), b);
     return map;
   }, [buses]);
 
   const usersById = useMemo(() => {
     const map = new Map<number, UserItem>();
-    for (const u of users) {
-      if (u?.id != null) map.set(Number(u.id), u);
-    }
+    for (const u of users) if (u?.id != null) map.set(Number(u.id), u);
     return map;
   }, [users]);
 
-  /* 🔥 Loc8 lookup: sanitize number/label to match plateNumber in db */
   const loc8ByPlate = useMemo(() => {
     const map = new Map<string, Loc8UnitRaw>();
     for (const u of loc8Units) {
       const rawPlate = (u.number ?? u.label ?? "").toString().trim();
-      const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase(); // e.g. "APITEST"
+      const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase();
       if (plateKey) map.set(plateKey, u);
     }
     return map;
@@ -217,13 +211,11 @@ export default function ParentPortal() {
 
   const latestManifestByStudent = useMemo(() => {
     const map = new Map<number, Manifest>();
-    const sorted = manifests
-      .slice()
-      .sort((a, b) => {
-        const da = a.date ? new Date(a.date).getTime() : 0;
-        const db = b.date ? new Date(b.date).getTime() : 0;
-        return db - da;
-      });
+    const sorted = manifests.slice().sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
     for (const m of sorted) {
       const sid = m.studentId ?? m.student?.id;
       if (sid && !map.has(sid)) map.set(sid, m);
@@ -263,9 +255,7 @@ export default function ParentPortal() {
     let liveSource: StudentView["liveSource"] = "student";
     let lastSeen: string | undefined = undefined;
 
-    /* 🔥 Live GPS Matching via Loc8 */
     const loc8Match = loc8ByPlate.get(plateKey);
-
     if (loc8Match) {
       const foundLat = Number(loc8Match.lat);
       const foundLng = Number(loc8Match.lng);
@@ -278,7 +268,6 @@ export default function ParentPortal() {
       liveSource = "loc8";
     }
 
-    // Fallback to manifest location
     if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
       lat = Number(latest.latitude);
       lon = Number(latest.longitude);
@@ -286,7 +275,6 @@ export default function ParentPortal() {
       liveSource = "manifest";
     }
 
-    // Fallback to student last known
     if ((!lat || !lon) && (s.latitude != null || s.longitude != null)) {
       lat = Number(s.latitude ?? s.lat ?? 0);
       lon = Number(s.longitude ?? s.lng ?? s.lon ?? 0);
@@ -327,8 +315,7 @@ export default function ParentPortal() {
       status,
       lat,
       lon,
-      readableLocation:
-        readableLocation || busCandidate?.route || busCandidate?.name || "Unknown",
+      readableLocation: readableLocation || busCandidate?.route || busCandidate?.name || "Unknown",
       busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
       plate: rawPlate || "N/A",
       driver: driverName,
@@ -338,8 +325,10 @@ export default function ParentPortal() {
     };
   });
 
-  const chosen = studentViews.find((v) => v.status === "CHECKED_IN" && v.lat && v.lon) ?? studentViews.find((v) => v.lat && v.lon);
-  const center: [number, number] = chosen && chosen.lat && chosen.lon ? [Number(chosen.lat), Number(chosen.lon)] : [-1.2921, 36.8219];
+  const markersWithCoords = studentViews.filter(v => v.lat && v.lon);
+  const bounds = markersWithCoords.length
+    ? L.latLngBounds(markersWithCoords.map(v => [v.lat!, v.lon!]))
+    : null;
 
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
@@ -442,32 +431,38 @@ export default function ParentPortal() {
 
         <div className="h-[500px]">
           <MapContainer
-            center={center}
+            center={[-1.2921, 36.8219]}
             zoom={12}
             style={{ width: "100%", height: "100%" }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {studentViews
-              .filter((v) => v.lat && v.lon)
-              .map((v) => (
+            <FitBounds bounds={bounds} />
+
+            {markersWithCoords.map((v) => {
+              let icon = busIconGray;
+              if (v.status === "CHECKED_IN") icon = busIconGreen;
+              else if (v.status === "CHECKED_OUT") icon = busIconRed;
+
+              return (
                 <Marker
                   key={v.student.id}
-                  position={[Number(v.lat), Number(v.lon)]}
-                  icon={busIcon}
+                  position={[Number(v.lat!), Number(v.lon!)]}
+                  icon={icon}
                 >
                   <Popup>
                     <div className="space-y-1">
                       <strong>{v.student.name}</strong>
                       <div>{v.busName} — {v.plate}</div>
+                      <div>Status: {v.status}</div>
                       <div>{v.readableLocation}</div>
                       <div>Driver: {v.driver}</div>
                       <div>Assistant: {v.assistant}</div>
-                      <div>Status: {v.status}</div>
                       {v.lastSeen && <div>Last Seen: {v.lastSeen}</div>}
                     </div>
                   </Popup>
                 </Marker>
-              ))}
+              );
+            })}
           </MapContainer>
         </div>
       </main>

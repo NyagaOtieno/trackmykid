@@ -178,8 +178,6 @@ export default function AssistantPortal() {
 
   // Helper: get current Kenya time (Africa/Nairobi)
   function getKenyaNow(): Date {
-    // Use toLocaleString to get the local time in Nairobi and convert back to Date
-    // This yields a Date object that represents the Nairobi local time.
     const str = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
     return new Date(str);
   }
@@ -188,21 +186,18 @@ export default function AssistantPortal() {
   function isWithinSession(session: "MORNING" | "EVENING"): boolean {
     const now = getKenyaNow();
     const hours = now.getHours();
-    const minutes = now.getMinutes();
 
     if (session === "MORNING") {
-      // 05:00 to 11:59:59.999
       const start = new Date(now);
       start.setHours(5, 0, 0, 0);
       const end = new Date(now);
       end.setHours(11, 59, 59, 999);
       return now >= start && now <= end;
     } else {
-      // EVENING: 12:00 to 19:30:00
       const start = new Date(now);
       start.setHours(12, 0, 0, 0);
       const end = new Date(now);
-      end.setHours(19, 30, 0, 0);
+      end.setHours(21, 30, 0, 0);
       return now >= start && now <= end;
     }
   }
@@ -238,7 +233,6 @@ export default function AssistantPortal() {
   const handleCheck = (student: any, status: "CHECKED_IN" | "CHECKED_OUT", session: "MORNING" | "EVENING") => {
     const nowKenya = getKenyaNow();
 
-    // Session window check
     if (!isWithinSession(session)) {
       toast.error(
         `${session === "MORNING" ? "Morning" : "Evening"} actions are allowed only during their session window (Kenya time).`
@@ -246,13 +240,13 @@ export default function AssistantPortal() {
       return;
     }
 
-    // Find today's manifests for this student
     const morning = todayManifests.find(
       (m) => m.studentId === student.id && m.session === "MORNING"
     );
-    const evening = todayManifests.find((m) => m.studentId === student.id && m.session === "EVENING");
+    const evening = todayManifests.find(
+      (m) => m.studentId === student.id && m.session === "EVENING"
+    );
 
-    // Rule: Do not allow offboarding if not onboarded (for the specific session)
     if (status === "CHECKED_OUT") {
       if (session === "MORNING") {
         if (!morning || morning.status !== "CHECKED_IN") {
@@ -267,49 +261,37 @@ export default function AssistantPortal() {
       }
     }
 
-    // Rule: Do not allow evening onboarding if morning hasn't been offboarded
     if (session === "EVENING" && status === "CHECKED_IN") {
-      // If there is a morning manifest and it is not CHECKED_OUT, block evening onboarding.
       if (morning && morning.status !== "CHECKED_OUT") {
         toast.error("Cannot onboard for evening: Morning session has not been offboarded yet.");
         return;
       }
-      // If there's no morning manifest, we allow evening onboarding (student may have come in only for evening)
     }
 
-    // Everything ok -> proceed
     checkMutation.mutate({ studentId: student.id, status, session });
   };
 
-  // Button disabled logic helper (so buttons show disabled state proactively)
+  // Button disabled logic helper
   const isActionDisabled = (student: any, action: "IN" | "OUT", session: "MORNING" | "EVENING") => {
-    // Disabled if not in session window
     if (!isWithinSession(session)) return true;
 
     const morning = todayManifests.find(
       (m) => m.studentId === student.id && m.session === "MORNING"
     );
-    const evening = todayManifests.find((m) => m.studentId === student.id && m.session === "EVENING");
+    const evening = todayManifests.find(
+      (m) => m.studentId === student.id && m.session === "EVENING"
+    );
 
     if (session === "MORNING") {
-      if (action === "IN") {
-        return morning?.status === "CHECKED_IN";
-      } else {
-        // OUT
-        // Disabled if not onboarded
-        return morning?.status !== "CHECKED_IN";
-      }
+      if (action === "IN") return morning?.status === "CHECKED_IN";
+      return morning?.status !== "CHECKED_IN";
     } else {
-      // EVENING
       if (action === "IN") {
-        // disabled if already checked in, or if morning exists but not offboarded
         if (evening?.status === "CHECKED_IN") return true;
         if (morning && morning.status !== "CHECKED_OUT") return true;
         return false;
-      } else {
-        // OUT
-        return evening?.status !== "CHECKED_IN";
       }
+      return evening?.status !== "CHECKED_IN";
     }
   };
 
@@ -432,7 +414,7 @@ export default function AssistantPortal() {
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
-                  setCurrentPage(1); // reset page on search
+                  setCurrentPage(1);
                 }}
               />
             </div>
@@ -469,14 +451,11 @@ export default function AssistantPortal() {
                     )}
                     <Button
                       size="sm"
-                      variant="outline"
+                      className={`${
+                        morning?.status === "CHECKED_IN" ? "bg-gray-400 text-white" : "bg-green-500 text-white"
+                      }`}
                       onClick={() => handleCheck(student, "CHECKED_IN", "MORNING")}
                       disabled={isActionDisabled(student, "IN", "MORNING")}
-                      title={
-                        isActionDisabled(student, "IN", "MORNING")
-                          ? "Cannot onboard in morning now"
-                          : "Onboard in morning"
-                      }
                     >
                       In (M)
                     </Button>
@@ -485,11 +464,6 @@ export default function AssistantPortal() {
                       variant="destructive"
                       onClick={() => handleCheck(student, "CHECKED_OUT", "MORNING")}
                       disabled={isActionDisabled(student, "OUT", "MORNING")}
-                      title={
-                        isActionDisabled(student, "OUT", "MORNING")
-                          ? "Cannot offboard in morning (not onboarded or outside window)"
-                          : "Offboard in morning"
-                      }
                     >
                       Out (M)
                     </Button>
@@ -507,14 +481,11 @@ export default function AssistantPortal() {
                     )}
                     <Button
                       size="sm"
-                      variant="outline"
+                      className={`${
+                        evening?.status === "CHECKED_IN" ? "bg-gray-400 text-white" : "bg-green-500 text-white"
+                      }`}
                       onClick={() => handleCheck(student, "CHECKED_IN", "EVENING")}
                       disabled={isActionDisabled(student, "IN", "EVENING")}
-                      title={
-                        isActionDisabled(student, "IN", "EVENING")
-                          ? "Cannot onboard in evening (either already onboarded, morning not offboarded, or outside window)"
-                          : "Onboard in evening"
-                      }
                     >
                       In (E)
                     </Button>
@@ -523,11 +494,6 @@ export default function AssistantPortal() {
                       variant="destructive"
                       onClick={() => handleCheck(student, "CHECKED_OUT", "EVENING")}
                       disabled={isActionDisabled(student, "OUT", "EVENING")}
-                      title={
-                        isActionDisabled(student, "OUT", "EVENING")
-                          ? "Cannot offboard in evening (student not onboarded in evening or outside window)"
-                          : "Offboard in evening"
-                      }
                     >
                       Out (E)
                     </Button>
@@ -537,23 +503,21 @@ export default function AssistantPortal() {
             })}
 
             {/* Pagination */}
-            <div className="flex justify-center items-center gap-2 mt-4">
+            <div className="flex justify-center items-center space-x-2 mt-4">
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                disabled={currentPage === 1}
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               >
                 Prev
               </Button>
               <span>
-                Page {currentPage} of {totalPages}
+                Page {currentPage} / {totalPages}
               </span>
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-                disabled={currentPage === totalPages}
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               >
                 Next
               </Button>

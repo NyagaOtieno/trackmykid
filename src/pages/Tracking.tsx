@@ -71,7 +71,7 @@ export default function Tracking() {
   const { data: locations = [], isLoading, refetch, isError } = useQuery({
     queryKey: ["liveLocations"],
     queryFn: getLiveLocations,
-    refetchInterval: 20000, // auto-refresh every 20s
+    refetchInterval: 5000, // auto-refresh every 5s
   });
 
   const [search, setSearch] = useState("");
