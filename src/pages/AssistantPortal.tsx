@@ -176,6 +176,37 @@ export default function AssistantPortal() {
     (m) => new Date(m.date) >= today && m.assistantId === assistantId && m.busId === bus?.id
   );
 
+  // Helper: get current Kenya time (Africa/Nairobi)
+  function getKenyaNow(): Date {
+    // Use toLocaleString to get the local time in Nairobi and convert back to Date
+    // This yields a Date object that represents the Nairobi local time.
+    const str = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
+    return new Date(str);
+  }
+
+  // Helper: is current time within a session
+  function isWithinSession(session: "MORNING" | "EVENING"): boolean {
+    const now = getKenyaNow();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+
+    if (session === "MORNING") {
+      // 05:00 to 11:59:59.999
+      const start = new Date(now);
+      start.setHours(5, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(11, 59, 59, 999);
+      return now >= start && now <= end;
+    } else {
+      // EVENING: 12:00 to 19:30:00
+      const start = new Date(now);
+      start.setHours(12, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(19, 30, 0, 0);
+      return now >= start && now <= end;
+    }
+  }
+
   // Session stats
   const morningOnboarded = todayManifests.filter(
     (m) => m.session === "MORNING" && m.status === "CHECKED_IN"
@@ -197,11 +228,90 @@ export default function AssistantPortal() {
   const filteredStudents = assignedStudents.filter((s) =>
     s.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage));
   const paginatedStudents = filteredStudents.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
+
+  // Wrapper that enforces rules before calling mutation
+  const handleCheck = (student: any, status: "CHECKED_IN" | "CHECKED_OUT", session: "MORNING" | "EVENING") => {
+    const nowKenya = getKenyaNow();
+
+    // Session window check
+    if (!isWithinSession(session)) {
+      toast.error(
+        `${session === "MORNING" ? "Morning" : "Evening"} actions are allowed only during their session window (Kenya time).`
+      );
+      return;
+    }
+
+    // Find today's manifests for this student
+    const morning = todayManifests.find(
+      (m) => m.studentId === student.id && m.session === "MORNING"
+    );
+    const evening = todayManifests.find((m) => m.studentId === student.id && m.session === "EVENING");
+
+    // Rule: Do not allow offboarding if not onboarded (for the specific session)
+    if (status === "CHECKED_OUT") {
+      if (session === "MORNING") {
+        if (!morning || morning.status !== "CHECKED_IN") {
+          toast.error("Cannot offboard morning: student has not been onboarded in the morning.");
+          return;
+        }
+      } else {
+        if (!evening || evening.status !== "CHECKED_IN") {
+          toast.error("Cannot offboard evening: student has not been onboarded in the evening.");
+          return;
+        }
+      }
+    }
+
+    // Rule: Do not allow evening onboarding if morning hasn't been offboarded
+    if (session === "EVENING" && status === "CHECKED_IN") {
+      // If there is a morning manifest and it is not CHECKED_OUT, block evening onboarding.
+      if (morning && morning.status !== "CHECKED_OUT") {
+        toast.error("Cannot onboard for evening: Morning session has not been offboarded yet.");
+        return;
+      }
+      // If there's no morning manifest, we allow evening onboarding (student may have come in only for evening)
+    }
+
+    // Everything ok -> proceed
+    checkMutation.mutate({ studentId: student.id, status, session });
+  };
+
+  // Button disabled logic helper (so buttons show disabled state proactively)
+  const isActionDisabled = (student: any, action: "IN" | "OUT", session: "MORNING" | "EVENING") => {
+    // Disabled if not in session window
+    if (!isWithinSession(session)) return true;
+
+    const morning = todayManifests.find(
+      (m) => m.studentId === student.id && m.session === "MORNING"
+    );
+    const evening = todayManifests.find((m) => m.studentId === student.id && m.session === "EVENING");
+
+    if (session === "MORNING") {
+      if (action === "IN") {
+        return morning?.status === "CHECKED_IN";
+      } else {
+        // OUT
+        // Disabled if not onboarded
+        return morning?.status !== "CHECKED_IN";
+      }
+    } else {
+      // EVENING
+      if (action === "IN") {
+        // disabled if already checked in, or if morning exists but not offboarded
+        if (evening?.status === "CHECKED_IN") return true;
+        if (morning && morning.status !== "CHECKED_OUT") return true;
+        return false;
+      } else {
+        // OUT
+        return evening?.status !== "CHECKED_IN";
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-muted/30 p-6">
@@ -360,28 +470,26 @@ export default function AssistantPortal() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        checkMutation.mutate({
-                          studentId: student.id,
-                          status: "CHECKED_IN",
-                          session: "MORNING",
-                        })
+                      onClick={() => handleCheck(student, "CHECKED_IN", "MORNING")}
+                      disabled={isActionDisabled(student, "IN", "MORNING")}
+                      title={
+                        isActionDisabled(student, "IN", "MORNING")
+                          ? "Cannot onboard in morning now"
+                          : "Onboard in morning"
                       }
-                      disabled={morning?.status === "CHECKED_IN"}
                     >
                       In (M)
                     </Button>
                     <Button
                       size="sm"
                       variant="destructive"
-                      onClick={() =>
-                        checkMutation.mutate({
-                          studentId: student.id,
-                          status: "CHECKED_OUT",
-                          session: "MORNING",
-                        })
+                      onClick={() => handleCheck(student, "CHECKED_OUT", "MORNING")}
+                      disabled={isActionDisabled(student, "OUT", "MORNING")}
+                      title={
+                        isActionDisabled(student, "OUT", "MORNING")
+                          ? "Cannot offboard in morning (not onboarded or outside window)"
+                          : "Offboard in morning"
                       }
-                      disabled={morning?.status === "CHECKED_OUT"}
                     >
                       Out (M)
                     </Button>
@@ -400,28 +508,26 @@ export default function AssistantPortal() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        checkMutation.mutate({
-                          studentId: student.id,
-                          status: "CHECKED_IN",
-                          session: "EVENING",
-                        })
+                      onClick={() => handleCheck(student, "CHECKED_IN", "EVENING")}
+                      disabled={isActionDisabled(student, "IN", "EVENING")}
+                      title={
+                        isActionDisabled(student, "IN", "EVENING")
+                          ? "Cannot onboard in evening (either already onboarded, morning not offboarded, or outside window)"
+                          : "Onboard in evening"
                       }
-                      disabled={evening?.status === "CHECKED_IN"}
                     >
                       In (E)
                     </Button>
                     <Button
                       size="sm"
                       variant="destructive"
-                      onClick={() =>
-                        checkMutation.mutate({
-                          studentId: student.id,
-                          status: "CHECKED_OUT",
-                          session: "EVENING",
-                        })
+                      onClick={() => handleCheck(student, "CHECKED_OUT", "EVENING")}
+                      disabled={isActionDisabled(student, "OUT", "EVENING")}
+                      title={
+                        isActionDisabled(student, "OUT", "EVENING")
+                          ? "Cannot offboard in evening (student not onboarded in evening or outside window)"
+                          : "Offboard in evening"
                       }
-                      disabled={evening?.status === "CHECKED_OUT"}
                     >
                       Out (E)
                     </Button>
