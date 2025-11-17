@@ -1,13 +1,28 @@
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Bus, Users, ClipboardList, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 
-// API calls
+/**
+ * Dashboard (single-file)
+ *
+ * - Keeps existing APIs (students, buses, manifests, users).
+ * - Replaces the old tracking call with mytrack-production endpoints:
+ *   - GET /api/devices/list
+ *   - GET /api/devices/latest?imei=
+ * - Uses X-API-Key header when calling mytrack-production.
+ */
+
+// === CONFIG ===
+const TRACK_API_BASE = "https://mytrack-production.up.railway.app";
+const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
+const POLL_INTERVAL_MS = 30_000; // 30 seconds
+
+// --- API calls (existing endpoints kept) ---
 const getStudents = async () => {
   const { data } = await axios.get(
     "https://schooltransport-production.up.railway.app/api/students"
@@ -36,7 +51,64 @@ const getUsers = async () => {
   return data.data || [];
 };
 
-// Reverse geocode helper
+// --- TrackMyKid API helpers (use X-API-Key header) ---
+const trackAxios = axios.create({
+  baseURL: TRACK_API_BASE,
+  headers: {
+    "X-API-Key": TRACK_API_KEY,
+  },
+});
+
+const getDevices = async () => {
+  const { data } = await trackAxios.get("/api/devices/list");
+  // support responses that are either array or { data: [...] }
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.data)) return data.data;
+  return data || [];
+};
+
+const getDeviceLatest = async (imei: string) => {
+  try {
+    const { data } = await trackAxios.get("/api/devices/latest", { params: { imei } });
+    const payload = data?.data ?? data ?? null;
+    if (!payload) return null;
+
+    // Accept both { latitude, longitude } and { lat, lng }
+    let latitude = payload.latitude ?? payload.lat ?? null;
+    let longitude = payload.longitude ?? payload.lng ?? null;
+    const timestamp = payload.timestamp ?? payload.time ?? payload.server_time ?? null;
+
+    // Convert to numbers where possible
+    latitude = latitude !== null && latitude !== undefined ? Number(latitude) : null;
+    longitude = longitude !== null && longitude !== undefined ? Number(longitude) : null;
+
+    // Defensive swap: if latitude appears > 90 but longitude <= 90, swap them
+    if (
+      Number.isFinite(latitude) &&
+      Math.abs(latitude) > 90 &&
+      Number.isFinite(longitude) &&
+      Math.abs(longitude) <= 90
+    ) {
+      const tmp = latitude;
+      latitude = longitude;
+      longitude = tmp;
+    }
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+    return {
+      latitude,
+      longitude,
+      timestamp,
+      raw: payload,
+    };
+  } catch (err) {
+    console.error("getDeviceLatest error", imei, err);
+    return null;
+  }
+};
+
+// --- Reverse geocode helper (Nominatim) ---
 const locationCache: Record<string, string> = {};
 const getLocationFromLatLon = async (lat: number, lon: number) => {
   const key = `${lat},${lon}`;
@@ -54,7 +126,7 @@ const getLocationFromLatLon = async (lat: number, lon: number) => {
   }
 };
 
-// Custom Leaflet icon for markers
+// --- Leaflet bus icon ---
 const busIcon = new L.Icon({
   iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61222.png",
   iconSize: [30, 30],
@@ -62,16 +134,21 @@ const busIcon = new L.Icon({
 });
 
 export default function Dashboard() {
+  // UI state
   const [studentSearch, setStudentSearch] = useState("");
   const [studentPage, setStudentPage] = useState(1);
   const [tripSearch, setTripSearch] = useState("");
   const [tripPage, setTripPage] = useState(1);
-  const [studentLocations, setStudentLocations] = useState<Record<number, string>>({});
-  const [manifestLocations, setManifestLocations] = useState<Record<number, string>>({});
-  const [driversMap, setDriversMap] = useState<Record<number, any>>({});
   const rowsPerPage = 10;
 
-  // --- Queries ---
+  // Data state
+  const [studentLocations, setStudentLocations] = useState<Record<number, string>>({});
+  const [manifestLocations, setManifestLocations] = useState<Record<number, any>>({});
+  const [driversMap, setDriversMap] = useState<Record<number, any>>({});
+  const [devices, setDevices] = useState<any[]>([]);
+  const manifestDeviceMapRef = useRef<Record<number, any>>({}); // manifestId -> device
+
+  // Queries for existing endpoints
   const { data: students = [], isLoading: loadingStudents, error: errorStudents } = useQuery({
     queryKey: ["students"],
     queryFn: getStudents,
@@ -92,36 +169,44 @@ export default function Dashboard() {
     queryFn: getUsers,
   });
 
+  // Fetch devices (track backend)
+  const { data: devicesData = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
+    queryKey: ["track-devices"],
+    queryFn: getDevices,
+    onSuccess: (d) => {
+      setDevices(d || []);
+    },
+  });
+
   // Map driverId -> driver object
   useEffect(() => {
     if (users.length > 0) {
       const map: Record<number, any> = {};
       users.forEach((u: any) => {
-        if (u.role === "DRIVER") {
-          map[u.id] = u;
-        }
+        if (u.role === "DRIVER") map[u.id] = u;
       });
       setDriversMap(map);
     }
   }, [users]);
 
-  // Error handling
-  const errorOccurred = errorStudents || errorBuses || errorManifests || errorUsers;
+  // Error toast
+  const errorOccurred = errorStudents || errorBuses || errorManifests || errorUsers || errorDevices;
   useEffect(() => {
     if (errorOccurred) toast.error("Failed to load some dashboard data. Please refresh.");
   }, [errorOccurred]);
 
-  const isLoading = loadingStudents || loadingBuses || loadingManifests || loadingUsers;
+  const isLoading =
+    loadingStudents || loadingBuses || loadingManifests || loadingUsers || loadingDevices;
 
-  // Today's trips
+  // Today's manifests
   const today = new Date().toISOString().split("T")[0];
   const todaysManifests = manifests.filter((m: any) => m.date?.startsWith(today));
 
-  // Student locations reverse geocode
+  // Student location reverse-geocode (unchanged)
   useEffect(() => {
     students.forEach(async (s: any) => {
-      const lat = s.student?.latitude || s.latitude;
-      const lon = s.student?.longitude || s.longitude;
+      const lat = s.student?.latitude ?? s.latitude;
+      const lon = s.student?.longitude ?? s.longitude;
       if (lat && lon && !studentLocations[s.id]) {
         const loc = await getLocationFromLatLon(lat, lon);
         setStudentLocations((prev) => ({ ...prev, [s.id]: loc }));
@@ -129,20 +214,169 @@ export default function Dashboard() {
     });
   }, [students]);
 
-  // Manifest locations reverse geocode
+  // Normalize plate helper
+  const normalizePlate = (v: any) => {
+    if (!v) return "";
+    return String(v).replace(/[\s\-]/g, "").toUpperCase();
+  };
+
+  // Resolve device match & fetch initial locations for manifests
   useEffect(() => {
+    // require devices to be loaded
+    if (!devices || devices.length === 0) return;
+
+    // iterate manifests for today
     todaysManifests.forEach(async (m: any) => {
-      const lat = m.latitude || m.bus?.latitude;
-      const lon = m.longitude || m.bus?.longitude;
-      if (lat && lon && !manifestLocations[m.id]) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "Loading location..." }));
-        const loc = await getLocationFromLatLon(lat, lon);
-        setManifestLocations((prev) => ({ ...prev, [m.id]: loc }));
+      // skip if already resolved
+      if (manifestLocations[m.id]) return;
+
+      const busObj = m.bus || {};
+      const candidates = [
+        busObj.registration,
+        busObj.vehicle_no,
+        busObj.name,
+        m.bus_no,
+        m.vehicle_no,
+      ]
+        .filter(Boolean)
+        .map(normalizePlate);
+
+      if (candidates.length === 0) {
+        setManifestLocations((prev) => ({ ...prev, [m.id]: "No vehicle registration available" }));
+        return;
+      }
+
+      const foundDevice = devices.find((d: any) => {
+        const devPlate = normalizePlate(d.vehicle_no ?? d.vehicleNo ?? d.vehicle_no ?? d.vehicleNo);
+        return candidates.includes(devPlate);
+      });
+
+      if (!foundDevice) {
+        setManifestLocations((prev) => ({ ...prev, [m.id]: "No tracking device matched" }));
+        return;
+      }
+
+      // save mapping
+      manifestDeviceMapRef.current[m.id] = foundDevice;
+
+      if (!foundDevice.imei) {
+        setManifestLocations((prev) => ({ ...prev, [m.id]: "Device found but IMEI missing" }));
+        return;
+      }
+
+      // temp loading state
+      setManifestLocations((prev) => ({ ...prev, [m.id]: "Loading location..." }));
+
+      // fetch latest
+      const latest = await getDeviceLatest(foundDevice.imei);
+      if (!latest) {
+        setManifestLocations((prev) => ({ ...prev, [m.id]: "No location returned" }));
+        return;
+      }
+
+      // reverse geocode
+      const address = await getLocationFromLatLon(latest.latitude, latest.longitude);
+
+      setManifestLocations((prev) => ({
+        ...prev,
+        [m.id]: {
+          latitude: latest.latitude,
+          longitude: latest.longitude,
+          timestamp: latest.timestamp,
+          address,
+          imei: foundDevice.imei,
+          deviceId: foundDevice.id,
+          raw: latest.raw,
+        },
+      }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices, todaysManifests]);
+
+  // Polling: refresh latest positions for unique IMEIs matched to today's manifests
+  useEffect(() => {
+    let cancelled = false;
+    const runPoll = async () => {
+      try {
+        // collect unique IMEIs from manifestDeviceMapRef
+        const imeis = Array.from(
+          new Set(
+            Object.values(manifestDeviceMapRef.current)
+              .filter(Boolean)
+              .map((d: any) => d.imei)
+              .filter(Boolean)
+          )
+        );
+
+        if (imeis.length === 0) return;
+
+        // fetch all latest concurrently
+        const results = await Promise.all(
+          imeis.map(async (imei) => {
+            const latest = await getDeviceLatest(imei);
+            return { imei, latest };
+          })
+        );
+
+        if (cancelled) return;
+
+        // Update each manifestLocations entry that maps to a given imei
+        const updates: Record<number, any> = {};
+        Object.entries(manifestDeviceMapRef.current).forEach(([manifestIdStr, device]) => {
+          const manifestId = Number(manifestIdStr);
+          const found = results.find((r) => r.imei === device.imei);
+          const entry = found?.latest;
+          if (!entry) return;
+          // reverse geocode if address changed or missing
+          (async () => {
+            const address =
+              manifestLocations[manifestId]?.address ||
+              (entry ? await getLocationFromLatLon(entry.latitude, entry.longitude) : "Unknown location");
+
+            updates[manifestId] = {
+              latitude: entry.latitude,
+              longitude: entry.longitude,
+              timestamp: entry.timestamp,
+              address,
+              imei: device.imei,
+              deviceId: device.id,
+              raw: entry.raw,
+            };
+
+            // push updates into state (batch)
+            setManifestLocations((prev) => ({ ...prev, ...updates }));
+          })();
+        });
+      } catch (err) {
+        console.error("Polling error", err);
+      }
+    };
+
+    // initial run
+    runPoll();
+
+    const id = setInterval(() => {
+      runPoll();
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices, todaysManifests]);
+
+  // ensure manifestLocations that have lat/lon but no address get reverse-geocoded
+  useEffect(() => {
+    Object.entries(manifestLocations).forEach(async ([mid, val]) => {
+      if (typeof val === "object" && val.latitude && val.longitude && !val.address) {
+        const address = await getLocationFromLatLon(val.latitude, val.longitude);
+        setManifestLocations((prev) => ({ ...prev, [Number(mid)]: { ...val, address } }));
       }
     });
-  }, [todaysManifests]);
+  }, [manifestLocations]);
 
-  // --- Filtered & paginated Students ---
+  // --- Filtered & paginated Students (unchanged) ---
   const filteredStudents = useMemo(() => {
     const search = studentSearch.toLowerCase();
     return students.filter((s: any) => {
@@ -163,11 +397,12 @@ export default function Dashboard() {
     studentPage * rowsPerPage
   );
 
-  // --- Filtered & paginated Trips ---
+  // --- Filtered & paginated Trips (uses manifestLocations for location text) ---
   const filteredTrips = useMemo(() => {
     const search = tripSearch.toLowerCase();
     return todaysManifests.filter((t: any) => {
-      const loc = manifestLocations[t.id] || "";
+      const locObj = manifestLocations[t.id];
+      const loc = typeof locObj === "string" ? locObj : (locObj?.address || "");
       const driverName = driversMap[t.bus?.driverId]?.name || "";
       return (
         (t.bus?.name?.toLowerCase().includes(search)) ||
@@ -344,7 +579,19 @@ export default function Dashboard() {
                       </span>
                     </td>
                     <td className="py-2 px-3">
-                      {manifestLocations[trip.id] ? manifestLocations[trip.id] : (
+                      {manifestLocations[trip.id] ? (
+                        typeof manifestLocations[trip.id] === "string" ? (
+                          manifestLocations[trip.id]
+                        ) : (
+                          <>
+                            <div>{manifestLocations[trip.id].address || "Loading..."}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {manifestLocations[trip.id].imei ? `IMEI: ${manifestLocations[trip.id].imei}` : ""}
+                              {manifestLocations[trip.id].timestamp ? ` • ${new Date(manifestLocations[trip.id].timestamp).toLocaleString()}` : ""}
+                            </div>
+                          </>
+                        )
+                      ) : (
                         <div className="flex items-center gap-2 text-gray-400">
                           <Loader2 className="w-4 h-4 animate-spin" /> Loading location...
                         </div>
@@ -386,9 +633,29 @@ export default function Dashboard() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           {todaysManifests.map((m: any) => {
-            const lat = m.latitude || m.bus?.latitude;
-            const lon = m.longitude || m.bus?.longitude;
+            // prefer resolved manifestLocations map entry
+            const resolved = manifestLocations[m.id];
+            let lat: number | undefined;
+            let lon: number | undefined;
+            let popupAddress = "";
+
+            if (typeof resolved === "object" && resolved?.latitude && resolved?.longitude) {
+              lat = resolved.latitude;
+              lon = resolved.longitude;
+              popupAddress = resolved.address || "";
+            } else {
+              // fallback to existing manifest/bus coordinates if any
+              const candidateLat = m.latitude ?? m.bus?.latitude;
+              const candidateLon = m.longitude ?? m.bus?.longitude;
+              if (candidateLat && candidateLon) {
+                lat = candidateLat;
+                lon = candidateLon;
+                popupAddress = typeof resolved === "string" ? resolved : "";
+              }
+            }
+
             if (!lat || !lon) return null;
+
             return (
               <Marker key={m.id} position={[lat, lon]} icon={busIcon}>
                 <Popup>
@@ -397,7 +664,7 @@ export default function Dashboard() {
                   <strong>Assistant:</strong> {m.assistant?.name || "N/A"} <br />
                   <strong>Status:</strong> {m.status || "N/A"} <br />
                   <strong>Session:</strong> {m.session || "N/A"} <br />
-                  <strong>Drop Off:</strong> {manifestLocations[m.id] || "Loading..."}
+                  <strong>Drop Off:</strong> {popupAddress || "Loading..."}
                 </Popup>
               </Marker>
             );
