@@ -6,17 +6,44 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"), // Enables "@/components/..."
+      "@": path.resolve(__dirname, "./src"), // Allows "@/components/..."
     },
   },
+  base: "/", // Set base path, change if deploying under subfolder
   server: {
-    open: true, // Automatically opens the browser on npm run dev
+    open: true, // Opens browser automatically on dev
+    port: 5173, // Optional: specify port
+    proxy: {
+      // Example: proxy API calls to backend during development
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
   build: {
-    outDir: "dist",          // Output directory for build
-    emptyOutDir: true,       // Clears old builds
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: true, // Optional: generate source maps for debugging
     rollupOptions: {
-      input: path.resolve(__dirname, "index.html"), // Root index.html for SPA
+      input: path.resolve(__dirname, "index.html"), // SPA entry
+      output: {
+        manualChunks: {
+          // Optional: split vendor chunks
+          react: ["react", "react-dom"],
+        },
+      },
     },
+  },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        additionalData: `@import "@/styles/variables.scss";`, // Auto import SCSS variables
+      },
+    },
+  },
+  optimizeDeps: {
+    include: ["react", "react-dom"], // Pre-bundle dependencies
   },
 });
