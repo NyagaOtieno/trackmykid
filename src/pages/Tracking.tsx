@@ -4,26 +4,52 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import "leaflet/dist/leaflet.css";
-import L from "leaflet";
+import * as L from "leaflet";
 import axios from "axios";
 
-// --- Backend API endpoint ---
-const FLEET_API =
-  "https://myfleet.track-loc8.com/api/v1/unit.json?key=44e824d4f70647af1bb9a314b4de7e73951c8ad6";
+// --- Backend API endpoints ---
+const BUSES_API = "https://schooltransport-production.up.railway.app/api/buses";
+const LIVE_API = "https://mytrack-production.up.railway.app/api/devices/list";
+const API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0=";
 
-// --- Fetch live vehicle data ---
-async function getLiveLocations() {
+// --- Mock data for dev fallback ---
+const MOCK_BUSES = [
+  { id: 1, plateNumber: "KAA 123A", route: "Route 1", driver: { name: "John" }, assistant: { name: "Doe" }, school: "ABC School" },
+  { id: 2, plateNumber: "KBB 456B", route: "Route 2", driver: { name: "Jane" }, assistant: { name: "Smith" }, school: "XYZ School" },
+];
+
+const MOCK_LIVE = [
+  { vehicle_no: "KAA 123A", last_lat: -1.2921, last_lng: 36.8219, movement_state: { name: "Moving" }, direction: 45, last_update: new Date().toISOString() },
+  { vehicle_no: "KBB 456B", last_lat: -1.3000, last_lng: 36.8100, movement_state: { name: "Standing" }, direction: 0, last_update: new Date().toISOString() },
+];
+
+// --- Fetch buses ---
+async function getBuses() {
+  if (import.meta.env.DEV) return MOCK_BUSES; // dev fallback
   try {
-    const response = await axios.get(FLEET_API);
-    const units = response.data?.data?.units;
-    return Array.isArray(units) ? units : [];
+    const response = await axios.get(BUSES_API, { withCredentials: true });
+    return response.data || [];
+  } catch (error) {
+    console.error("Error fetching buses:", error);
+    return [];
+  }
+}
+
+// --- Fetch live locations ---
+async function getLiveLocations() {
+  if (import.meta.env.DEV) return MOCK_LIVE; // dev fallback
+  try {
+    const response = await axios.get(LIVE_API, {
+      headers: { "X-API-Key": API_KEY },
+    });
+    return response.data || [];
   } catch (error) {
     console.error("Error fetching live locations:", error);
     return [];
   }
 }
 
-// --- Smooth fly-to animation for selected vehicle ---
+// --- Fly to selected vehicle ---
 function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
   const map = useMap();
   useEffect(() => {
@@ -34,90 +60,105 @@ function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
   return null;
 }
 
-// --- Custom vehicle icon ---
-function createVehicleIcon(vehicle: any) {
-  const { number, movement_state, direction } = vehicle;
+// --- Vehicle icon ---
+const createVehicleIcon = (vehicle: any) => {
   const color =
-    movement_state?.name?.toLowerCase() === "standing" ? "#28a745" : "#dc3545"; // green=stopped, red=moving
+    vehicle.movement_state?.name?.toLowerCase() === "standing"
+      ? "#28a745"
+      : "#dc3545";
 
   return L.divIcon({
-    html: `
-      <div style="
-        transform: rotate(${direction || 0}deg);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: ${color};
-        color: white;
-        font-size: 10px;
-        font-weight: bold;
-        border-radius: 4px;
-        border: 1px solid #fff;
-        padding: 2px 4px;
-        min-width: 26px;
-        height: 24px;
-        white-space: nowrap;
-      ">
-        🚍 ${number || "N/A"}
-      </div>`,
+    html: `<div style="
+      transform: rotate(${vehicle.direction || 0}deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: ${color};
+      color: white;
+      font-size: 10px;
+      font-weight: bold;
+      border-radius: 4px;
+      border: 1px solid #fff;
+      padding: 2px 4px;
+      min-width: 26px;
+      height: 24px;
+      white-space: nowrap;
+    ">🚍 ${vehicle.number}</div>`,
     className: "",
     iconSize: [28, 24],
     iconAnchor: [14, 12],
   });
-}
+};
 
-// --- Main component ---
+// --- Main Tracking Component ---
 export default function Tracking() {
-  const { data: locations = [], isLoading, refetch, isError } = useQuery({
+  const { data: buses = [], isLoading: loadingBuses } = useQuery({
+    queryKey: ["buses"],
+    queryFn: getBuses,
+  });
+
+  const { data: live = [], isLoading: loadingLive, refetch } = useQuery({
     queryKey: ["liveLocations"],
     queryFn: getLiveLocations,
-    refetchInterval: 5000, // auto-refresh every 5s
+    refetchInterval: 5000,
   });
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
-  const safeLocations = Array.isArray(locations) ? locations : [];
+  const locations = useMemo(() => {
+    if (!buses || !live) return [];
 
-  // --- Filter vehicles by search ---
-  const filteredLocations = useMemo(() => {
-    return safeLocations.filter((v: any) =>
-      v.number?.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [search, safeLocations]);
+    return buses
+      .map((bus: any) => {
+        const liveData = live.find(
+          (v: any) => v.vehicle_no?.toUpperCase() === bus.plateNumber?.toUpperCase()
+        );
 
-  // --- Auto-select first filtered vehicle ---
+        if (!liveData || !liveData.last_lat || !liveData.last_lng) return null;
+
+        return {
+          unit_id: bus.id,
+          number: bus.plateNumber,
+          route: bus.route,
+          driver: bus.driver,
+          assistant: bus.assistant,
+          school: bus.school,
+          lat: liveData.last_lat,
+          lng: liveData.last_lng,
+          movement_state: liveData.movement_state || { name: "N/A" },
+          direction: liveData.direction || 0,
+          last_update: liveData.last_update || null,
+        };
+      })
+      .filter(Boolean);
+  }, [buses, live]);
+
+  const filteredLocations = useMemo(
+    () =>
+      locations.filter((v: any) =>
+        v.number?.toLowerCase().includes(search.toLowerCase())
+      ),
+    [locations, search]
+  );
+
   useEffect(() => {
-    if (filteredLocations.length > 0) {
-      setSelectedVehicle(filteredLocations[0]);
-    } else {
-      setSelectedVehicle(null);
-    }
+    setSelectedVehicle(filteredLocations[0] || null);
   }, [filteredLocations]);
 
-  const center =
-    selectedVehicle?.lat && selectedVehicle?.lng
-      ? [selectedVehicle.lat, selectedVehicle.lng]
-      : safeLocations.length > 0
-      ? [safeLocations[0].lat, safeLocations[0].lng]
-      : [-1.2921, 36.8219]; // Default to Nairobi
+  const center: [number, number] = selectedVehicle
+    ? [selectedVehicle.lat, selectedVehicle.lng]
+    : locations[0]
+    ? [locations[0].lat, locations[0].lng]
+    : [-1.2921, 36.8219];
 
-  // --- Loading and Error states ---
-  if (isLoading)
+  if (loadingBuses || loadingLive)
     return (
       <div className="flex items-center justify-center h-[600px]">
-        <p>Loading live vehicle map...</p>
+        Loading live vehicle map...
       </div>
     );
 
-  if (isError)
-    return (
-      <div className="text-center text-red-500 py-10">
-        Failed to load vehicle locations. Please try again later.
-      </div>
-    );
-
-  // --- Render ---
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -133,7 +174,7 @@ export default function Tracking() {
         </div>
       </div>
 
-      {/* Search and Refresh */}
+      {/* Search & Refresh */}
       <div className="flex gap-2 items-center">
         <Input
           placeholder="Search by vehicle number..."
@@ -146,25 +187,18 @@ export default function Tracking() {
 
       {/* Map */}
       <div className="bg-card rounded-lg border overflow-hidden h-[600px]">
-        <MapContainer
-          key={safeLocations.length}
-          center={center as [number, number]}
-          zoom={12}
-          style={{ height: "100%", width: "100%" }}
-        >
+        <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }}>
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {filteredLocations.map((vehicle: any) => (
+          {filteredLocations.map((vehicle) => (
             <Marker
               key={vehicle.unit_id}
               position={[vehicle.lat, vehicle.lng]}
               icon={createVehicleIcon(vehicle)}
-              eventHandlers={{
-                click: () => setSelectedVehicle(vehicle),
-              }}
+              eventHandlers={{ click: () => setSelectedVehicle(vehicle) }}
             >
               <Popup>
                 <div className="p-2 space-y-1">
@@ -184,6 +218,15 @@ export default function Tracking() {
                       ? new Date(vehicle.last_update).toLocaleString()
                       : "N/A"}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    Route: {vehicle.route}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Driver: {vehicle.driver?.name || "N/A"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Assistant: {vehicle.assistant?.name || "N/A"}
+                  </p>
                 </div>
               </Popup>
             </Marker>
@@ -195,7 +238,7 @@ export default function Tracking() {
 
       {/* Vehicle List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredLocations.map((vehicle: any) => (
+        {filteredLocations.map((vehicle) => (
           <div
             key={vehicle.unit_id}
             className={`bg-card rounded-lg border p-4 cursor-pointer hover:bg-accent ${
@@ -206,9 +249,7 @@ export default function Tracking() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold">{vehicle.number}</h3>
-                <p className="text-sm text-muted-foreground">
-                  ID: {vehicle.unit_id}
-                </p>
+                <p className="text-sm text-muted-foreground">Route: {vehicle.route}</p>
               </div>
               <div
                 className={`h-3 w-3 rounded-full animate-pulse ${
@@ -217,19 +258,6 @@ export default function Tracking() {
                     : "bg-red-500"
                 }`}
               />
-            </div>
-            <div className="mt-3 text-xs text-muted-foreground space-y-1">
-              <p>Lat: {vehicle.lat.toFixed(4)}</p>
-              <p>Lng: {vehicle.lng.toFixed(4)}</p>
-              <p>State: {vehicle.state?.name}</p>
-              <p>Movement: {vehicle.movement_state?.name}</p>
-              <p>Direction: {vehicle.direction}°</p>
-              <p>
-                Last Update:{" "}
-                {vehicle.last_update
-                  ? new Date(vehicle.last_update).toLocaleString()
-                  : "N/A"}
-              </p>
             </div>
           </div>
         ))}
