@@ -15,19 +15,19 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useMemo, useEffect } from "react";
 
-/* ---------------- Bus Icons ---------------- */
+/* ---------------- Bus Icons (🚍 style) ---------------- */
 const busIconGreen = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61439.png", // green bus
   iconSize: [32, 32],
   iconAnchor: [16, 32],
 });
 const busIconRed = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61437.png", // red bus
   iconSize: [32, 32],
   iconAnchor: [16, 32],
 });
 const busIconGray = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png",
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61436.png", // gray bus
   iconSize: [32, 32],
   iconAnchor: [16, 32],
 });
@@ -51,9 +51,7 @@ const BUSES_ENDPOINT =
 const USERS_ENDPOINT =
   "https://schooltransport-production.up.railway.app/api/users";
 const TRACKING_ENDPOINT =
-  "https://mytrack-production.up.railway.app/api/devices/list";
-
-const API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0=";
+  "https://schooltransport-production.up.railway.app/api/tracking/bus-locations";
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
@@ -71,7 +69,6 @@ type Manifest = {
   session?: string | null;
   student?: any;
   bus?: any;
-  assistant?: any;
 };
 type BusItem = {
   id: number;
@@ -85,11 +82,12 @@ type BusItem = {
 };
 type UserItem = { id: number; name?: string; role?: string; phone?: string | null };
 type DeviceItem = {
-  id: number;
-  vehicle_no?: string;
-  last_lat?: number;
-  last_lng?: number;
-  deviceTime?: string;
+  busId: number;
+  plateNumber?: string;
+  lat?: number | null;
+  lng?: number | null;
+  movementState?: string | null;
+  lastUpdate?: string;
   [k: string]: any;
 };
 
@@ -159,19 +157,21 @@ export default function ParentPortal() {
   });
   const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 
-  const { data: devicesRaw } = useQuery<DeviceItem[]>({
-    queryKey: ["devices"],
+  /* ---------------- FETCH LIVE BUS LOCATIONS ---------------- */
+  const { data: busLocationsRaw } = useQuery<DeviceItem[]>({
+    queryKey: ["busLocations"],
     queryFn: async () => {
+      const token = sessionStorage.getItem("token");
       const res = await fetch(TRACKING_ENDPOINT, {
-        headers: { "X-API-Key": API_KEY }, // correct header
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return [];
       const json = await res.json();
-      return Array.isArray(json) ? json : [];
+      return Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 15000,
   });
-  const devices: DeviceItem[] = Array.isArray(devicesRaw) ? devicesRaw : [];
+  const busLocations: DeviceItem[] = Array.isArray(busLocationsRaw) ? busLocationsRaw : [];
 
   /* ---------------- HELPER MAPS ---------------- */
   const busesById = useMemo(() => {
@@ -186,14 +186,14 @@ export default function ParentPortal() {
     return map;
   }, [users]);
 
-  const devicesByPlate = useMemo(() => {
+  const busLocationsByPlate = useMemo(() => {
     const map = new Map<string, DeviceItem>();
-    for (const d of devices) {
-      const plateKey = (d.vehicle_no ?? "").toString().trim().replace(/\s+/g, "").toUpperCase();
-      if (plateKey) map.set(plateKey, d);
+    for (const d of busLocations) {
+      const key = (d.plateNumber ?? "").toString().trim().replace(/\s+/g, "").toUpperCase();
+      if (key) map.set(key, d);
     }
     return map;
-  }, [devices]);
+  }, [busLocations]);
 
   const latestManifestByStudent = useMemo(() => {
     const map = new Map<number, Manifest>();
@@ -222,6 +222,7 @@ export default function ParentPortal() {
     assistant?: string;
     lastSeen?: string;
     liveSource?: "device" | "manifest" | "student";
+    movementState?: string;
   };
 
   const studentViews: StudentView[] = myStudents.map((s: any) => {
@@ -237,31 +238,18 @@ export default function ParentPortal() {
     let readableLocation = "Location unavailable";
     let liveSource: StudentView["liveSource"] = "student";
     let lastSeen: string | undefined = undefined;
+    let movementState: string | undefined = undefined;
 
-    // 1) STRICT MATCH
-    let deviceMatch = devicesByPlate.get(plateKey);
+    // Match device by plate
+    let deviceMatch = busLocationsByPlate.get(plateKey);
 
-    // 2) FALLBACK: LOOSE MATCH
-    if (!deviceMatch) {
-      deviceMatch = devices.find((d) => {
-        const normalized = (d.vehicle_no ?? "")
-          .toString()
-          .trim()
-          .replace(/\s+/g, "")
-          .replace(/-/g, "")
-          .toUpperCase();
-        return normalized === plateKey;
-      });
-    }
-
-    // 3) APPLY MATCHED DEVICE
-    if (deviceMatch && deviceMatch.last_lat != null && deviceMatch.last_lng != null) {
-      // NOTE: Swap coordinates as per API response
-      lat = Number(deviceMatch.last_lng);
-      lon = Number(deviceMatch.last_lat);
-      readableLocation = deviceMatch.vehicle_no ?? rawPlate;
+    if (deviceMatch && deviceMatch.lat != null && deviceMatch.lng != null) {
+      lat = Number(deviceMatch.lat);
+      lon = Number(deviceMatch.lng);
+      readableLocation = s.name; // show student name instead of plate
       liveSource = "device";
-      lastSeen = deviceMatch.deviceTime;
+      lastSeen = deviceMatch.lastUpdate;
+      movementState = deviceMatch.movementState ?? "unknown";
     }
 
     if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
@@ -269,6 +257,7 @@ export default function ParentPortal() {
       lon = Number(latest.longitude);
       readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
       liveSource = "manifest";
+      movementState = "unknown";
     }
 
     const driverName =
@@ -292,13 +281,14 @@ export default function ParentPortal() {
       status,
       lat,
       lon,
-      readableLocation: readableLocation || busCandidate?.route || busCandidate?.name || "Unknown",
+      readableLocation,
       busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
       plate: rawPlate || "N/A",
       driver: driverName,
       assistant: assistantName,
       lastSeen,
       liveSource,
+      movementState,
     };
   });
 
@@ -395,6 +385,7 @@ export default function ParentPortal() {
                         <div className="text-xs text-muted-foreground">
                           {v.readableLocation}
                           {v.lastSeen ? ` — last seen: ${fmt(v.lastSeen)}` : ""}
+                          {v.movementState ? ` — Movement: ${v.movementState}` : ""}
                         </div>
                       </div>
                     </div>
@@ -424,9 +415,10 @@ export default function ParentPortal() {
             <FitBounds bounds={bounds} />
 
             {markersWithCoords.map((v) => {
+              // Default gray bus
               let icon = busIconGray;
-              if (v.status === "CHECKED_IN") icon = busIconGreen;
-              else if (v.status === "CHECKED_OUT") icon = busIconRed;
+              if (v.movementState === "moving") icon = busIconGreen;
+              else if (v.movementState === "stopped") icon = busIconRed;
 
               return (
                 <Marker
@@ -437,12 +429,13 @@ export default function ParentPortal() {
                   <Popup>
                     <div className="space-y-1">
                       <strong>{v.student.name}</strong>
-                      <div>{v.busName} — {v.plate}</div>
+                      <div>{v.busName}</div>
                       <div>Status: {v.status}</div>
                       <div>{v.readableLocation}</div>
                       <div>Driver: {v.driver}</div>
                       <div>Assistant: {v.assistant}</div>
                       {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
+                      {v.movementState && <div>Bus Movement: {v.movementState}</div>}
                     </div>
                   </Popup>
                 </Marker>
