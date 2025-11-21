@@ -542,8 +542,8 @@ export default function AssistantPortal() {
               </div>
 
               {busLocation ? (
-                <MapContainer
-  center={mapCenter ?? [busLocation.lat, busLocation.lng]}
+               <MapContainer
+  center={mapCenter ?? [0,0]}  // default fallback
   zoom={15}
   scrollWheelZoom={true}
   className="h-56 w-full mt-2 rounded-lg"
@@ -552,17 +552,22 @@ export default function AssistantPortal() {
     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
     attribution="&copy; OpenStreetMap contributors"
   />
-  <AutoCenter center={mapCenter} />
-  <Marker position={[busLocation.lat, busLocation.lng]}>
-    <Popup>
-      {bus.name} ({bus.plateNumber})<br />
-      {busLocation.address}<br />
-      Speed: {latestSpeed ?? "N/A"} km/h<br />
-      Last: {lastUpdated ?? "N/A"}
-    </Popup>
-  </Marker>
-  {routePositions.length > 1 && <Polyline positions={routePositions} />}
+  <AutoCenterWrapper center={busLocation ? mapCenter : null} />
+  {busLocation && (
+    <>
+      <Marker position={[busLocation.lat, busLocation.lng]}>
+        <Popup>
+          {bus.name} ({bus.plateNumber})<br />
+          {busLocation.address}<br />
+          Speed: {latestSpeed ?? "N/A"} km/h<br />
+          Last: {lastUpdated ?? "N/A"}
+        </Popup>
+      </Marker>
+      {routePositions.length > 1 && <Polyline positions={routePositions} />}
+    </>
+  )}
 </MapContainer>
+
 
               ) : (
                 <p className="text-sm text-muted-foreground mt-2">Bus location not available</p>
