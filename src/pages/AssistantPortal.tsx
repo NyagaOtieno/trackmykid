@@ -30,22 +30,30 @@ const BUS_LOCATIONS_API = `${API_BASE}/tracking/bus-locations`;
 const PANIC_API = `${API_BASE}/panic`;
 
 export default function AssistantPortal() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const user = JSON.parse(localStorage.getItem("user") || "null");
-  const token = localStorage.getItem("token");
-  const assistantId = user?.id;
+ const navigate = useNavigate();
+const queryClient = useQueryClient();
+const user = JSON.parse(localStorage.getItem("user") || "null");
+const token = localStorage.getItem("token");
+const assistantId = user?.id;
 
-  const [busLocation, setBusLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
-  const [routePositions, setRoutePositions] = useState<Array<[number, number]>>([]);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [autoFollow, setAutoFollow] = useState<boolean>(true);
-  const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
-  const routeRef = useRef<Array<string>>([]);
+// ----------------- PANIC MODAL STATE -----------------
+const [panicModalOpen, setPanicModalOpen] = useState(false);
+const [panicTarget, setPanicTarget] = useState<{ type: "bus" | "student"; student?: any } | null>(null);
+const [panicReason, setPanicReason] = useState("Assistance needed!");
+const [panicRemarks, setPanicRemarks] = useState("");
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+// ----------------- BUS & STUDENT STATE -----------------
+const [busLocation, setBusLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
+const [routePositions, setRoutePositions] = useState<Array<[number, number]>>([]);
+const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+const [autoFollow, setAutoFollow] = useState<boolean>(true);
+const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
+const routeRef = useRef<Array<string>>([]);
+
+const [searchTerm, setSearchTerm] = useState("");
+const [currentPage, setCurrentPage] = useState(1);
+const itemsPerPage = 10;
+
 
   // Redirect if not logged in
   useEffect(() => {
@@ -254,9 +262,7 @@ export default function AssistantPortal() {
   const filteredStudents = assignedStudents.filter((s: any) => s.name?.toLowerCase().includes(searchTerm.toLowerCase()));
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / itemsPerPage));
   const paginatedStudents = filteredStudents.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const [panicModalOpen, setPanicModalOpen] = useState(false);
-  const [panicTarget, setPanicTarget] = useState<{ type: "bus" | "student"; student?: any } | null>(null);
-  const [panicReason, setPanicReason] = useState<string>("Assistance needed!");
+ 
 
   return (
     <div className="min-h-screen bg-muted/30 p-6">
@@ -306,45 +312,77 @@ export default function AssistantPortal() {
   >
     Onboard All (Evening)
   </Button>
-  <Button
+<Button
   className="bg-yellow-500 text-black hover:bg-yellow-600"
-  onClick={() => { setPanicTarget({ type: "bus" }); setPanicModalOpen(true); }}
+  onClick={() => {
+    setPanicTarget({ type: "bus" });
+    setPanicReason("Assistance needed!");
+    setPanicModalOpen(true);
+  }}
 >
   Panic Button
 </Button>
 
+
+{/* PANIC MODAL */}
 {panicModalOpen && panicTarget && (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
     <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
       <h3 className="text-lg font-bold">
-        {panicTarget.type === "bus" ? "Send Panic for Bus" : `Send Panic for ${panicTarget.student.name}`}
+        {panicTarget.type === "bus"
+          ? "Send Panic for Bus"
+          : `Send Panic for ${panicTarget.student?.name}`}
       </h3>
 
-      <textarea
+      <label className="font-semibold">Select Panic Reason</label>
+      <select
         className="w-full p-2 border rounded"
         value={panicReason}
         onChange={(e) => setPanicReason(e.target.value)}
+      >
+        <option value="Child Unwell">Child Unwell</option>
+        <option value="Fight / Bullying">Fight / Bullying</option>
+        <option value="Missing Item">Missing Item</option>
+        <option value="Lost Child">Lost Child</option>
+        <option value="Suspicious Person">Suspicious Person</option>
+        <option value="Accident">Accident</option>
+        <option value="Mechanical Issue">Mechanical Issue</option>
+        <option value="Traffic">Traffic</option>
+        <option value="Other">Other</option>
+      </select>
+
+      <label className="font-semibold mt-2">Additional Remarks (Optional)</label>
+      <textarea
+        className="w-full p-2 border rounded h-24"
+        placeholder="Add more details (optional)"
+        value={panicRemarks}
+        onChange={(e) => setPanicRemarks(e.target.value)}
       />
 
-      <div className="flex justify-end gap-3">
+      <div className="flex justify-end gap-3 pt-3">
         <Button
           variant="destructive"
           onClick={() => {
             panicMutation.mutate({
               reason: panicReason,
-              ...(panicTarget.type === "student" ? { studentId: panicTarget.student.id } : {}),
+              remarks: panicRemarks || "",
+              ...(panicTarget.type === "student" ? { studentId: panicTarget.student?.id } : {}),
             });
+
             setPanicModalOpen(false);
-            setPanicReason("Assistance needed!");
+            setPanicReason("Child Unwell");
+            setPanicRemarks("");
             setPanicTarget(null);
           }}
         >
           Send Panic
         </Button>
+
         <Button
           onClick={() => {
             setPanicModalOpen(false);
-            setPanicReason("Assistance needed!");
+            setPanicReason("Child Unwell");
+            setPanicRemarks("");
             setPanicTarget(null);
           }}
         >
@@ -354,6 +392,8 @@ export default function AssistantPortal() {
     </div>
   </div>
 )}
+
+
 
 </div>
 
@@ -366,10 +406,7 @@ export default function AssistantPortal() {
             {paginatedStudents.map((student: any) => {
               const morning = todayManifests.find((m: any) => (m.student?.id === student.id || m.studentId === student.id) && m.session === "MORNING");
               const evening = todayManifests.find((m: any) => (m.student?.id === student.id || m.studentId === student.id) && m.session === "EVENING");
-              const [panicModalOpen, setPanicModalOpen] = useState(false);
-              const [panicStudent, setPanicStudent] = useState<any>(null);
-              const [panicReason, setPanicReason] = useState<string>("Assistance needed!");
-
+         
               return (
                 <div key={student.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-muted rounded-lg">
                   <div className="flex-1">
@@ -389,44 +426,14 @@ export default function AssistantPortal() {
 <Button
   size="sm"
   className="bg-yellow-500 text-black hover:bg-yellow-600"
-  onClick={() => setPanicStudent(student)}
+  onClick={() => {
+    setPanicTarget({ type: "student", student });
+    setPanicReason("Assistance needed!");
+    setPanicModalOpen(true);
+  }}
 >
   Panic
 </Button>
-
-{/* Modal */}
-{panicStudent?.id === student.id && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-    <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
-      <h3 className="text-lg font-bold">Send Panic for {student.name}</h3>
-      <textarea
-        className="w-full p-2 border rounded"
-        value={panicReason}
-        onChange={(e) => setPanicReason(e.target.value)}
-      />
-      <div className="flex justify-end gap-3">
-        <Button
-          variant="destructive"
-          onClick={() => {
-            panicMutation.mutate({ reason: panicReason, studentId: student.id });
-            setPanicStudent(null);
-            setPanicReason("Assistance needed!");
-          }}
-        >
-          Send Panic
-        </Button>
-        <Button
-          onClick={() => {
-            setPanicStudent(null);
-            setPanicReason("Assistance needed!");
-          }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </div>
-  </div>
-)}
 
                  </div>
                 </div>
