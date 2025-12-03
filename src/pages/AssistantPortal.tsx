@@ -459,16 +459,58 @@ const itemsPerPage = 10;
               <Badge>Current Location: {busLocation?.address ?? "N/A"}</Badge>
             </div>
 
-            {busLocation && (
-              <MapContainer center={mapCenter || [busLocation.lat, busLocation.lng]} zoom={15} scrollWheelZoom style={{ height: "400px", width: "100%" }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <Marker position={[busLocation.lat, busLocation.lng]}>
-                  <Popup>{busLocation.address}</Popup>
-                </Marker>
-                {routePositions.length > 0 && <Polyline positions={routePositions as any} color="blue" />}
-                <AutoCenter center={mapCenter} />
-              </MapContainer>
-            )}
+           {busLocation && (
+  <MapContainer
+    center={mapCenter || [busLocation.lat, busLocation.lng]}
+    zoom={17}
+    scrollWheelZoom
+    style={{ height: "400px", width: "100%" }}
+  >
+    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+    {/* Polyline for the route */}
+    {routePositions.length > 0 && (
+      <Polyline
+        positions={routePositions
+          .filter((pos, i, arr) =>
+            i === 0 || pos[0] !== arr[i - 1][0] || pos[1] !== arr[i - 1][1]
+          )}
+        color="blue"
+      />
+    )}
+
+    {/* Markers for each route point */}
+    {routePositions.map((pos, idx) => (
+      <Marker
+        key={idx}
+        position={pos}
+        icon={
+          idx === routePositions.length - 1
+            ? new L.Icon({
+                iconUrl:
+                  "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-red.png",
+                iconRetinaUrl:
+                  "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+                shadowUrl:
+                  "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+              })
+            : new L.Icon.Default()
+        }
+      >
+        <Popup>
+          {`Point ${idx + 1}`}<br />
+          Lat: {pos[0]} <br />
+          Lng: {pos[1]}
+        </Popup>
+      </Marker>
+    ))}
+
+    <AutoCenter center={mapCenter} />
+  </MapContainer>
+)}
+
 </CardContent>
         </Card>
       </div>

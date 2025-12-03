@@ -18,26 +18,29 @@ import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import AddBusForm from "@/pages/AddBusForm";
 
+interface Bus {
+  id: number;
+  name: string;
+  plateNumber: string;
+  route: string;
+  capacity: number;
+  isMoving: boolean;
+}
+
 export default function Buses() {
   const queryClient = useQueryClient();
-
-  // State
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "name", direction: "asc" });
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  const [selectedBus, setSelectedBus] = useState<any | null>(null);
+  const [selectedBus, setSelectedBus] = useState<Bus | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // Fetch Buses
-  const {
-    data: buses = [],
-    isLoading,
-    isError,
-  } = useQuery({
+  const { data: buses = [], isLoading, isError } = useQuery({
     queryKey: ["buses"],
     queryFn: getBuses,
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
 
   // Delete mutation
@@ -49,37 +52,38 @@ export default function Buses() {
     },
   });
 
-  // Handle Sorting
+  // Sorting
   const sortedBuses = useMemo(() => {
-    if (!buses) return [];
     return [...buses].sort((a, b) => {
-      const valA = a[sortConfig.key];
-      const valB = b[sortConfig.key];
+      const valA = (a as any)[sortConfig.key] ?? "";
+      const valB = (b as any)[sortConfig.key] ?? "";
       if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
       if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
   }, [buses, sortConfig]);
 
-  // Handle Filtering
-  const filteredBuses = sortedBuses.filter((bus) => {
+  // Filtering
+  const filteredBuses = useMemo(() => {
+    if (!searchTerm) return sortedBuses;
     const search = searchTerm.toLowerCase();
-    return (
-      bus.name.toLowerCase().includes(search) ||
-      bus.plateNumber.toLowerCase().includes(search) ||
-      bus.route.toLowerCase().includes(search)
+    return sortedBuses.filter(
+      (bus) =>
+        bus.name.toLowerCase().includes(search) ||
+        bus.plateNumber.toLowerCase().includes(search) ||
+        bus.route.toLowerCase().includes(search)
     );
-  });
+  }, [searchTerm, sortedBuses]);
 
   // Pagination
+  const totalPages = Math.ceil(filteredBuses.length / itemsPerPage);
   const paginatedBuses = filteredBuses.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-  const totalPages = Math.ceil(filteredBuses.length / itemsPerPage);
 
-  // Export Handlers
-  const handleExportCSV = () => {
+  // Export Helpers
+  const exportCSV = () => {
     const csv = Papa.unparse(buses);
     const blob = new Blob([csv], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
@@ -90,15 +94,15 @@ export default function Buses() {
     window.URL.revokeObjectURL(url);
   };
 
-  const handleExportExcel = () => {
+  const exportExcel = () => {
     const worksheet = XLSX.utils.json_to_sheet(buses);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Buses");
     XLSX.writeFile(workbook, "buses.xlsx");
   };
 
-  // UI Handlers
-  const handleSort = (key: string) => {
+  // Handlers
+  const handleSort = (key: keyof Bus) => {
     setSortConfig((prev) => ({
       key,
       direction: prev.direction === "asc" ? "desc" : "asc",
@@ -111,7 +115,7 @@ export default function Buses() {
     }
   };
 
-  const handleDialogOpen = (bus = null) => {
+  const openDialog = (bus: Bus | null = null) => {
     setSelectedBus(bus);
     setIsDialogOpen(true);
   };
@@ -125,13 +129,13 @@ export default function Buses() {
           <p className="text-muted-foreground mt-1">Manage fleet and bus assignments</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleExportCSV}>
+          <Button variant="outline" onClick={exportCSV}>
             <Download className="h-4 w-4 mr-2" /> CSV
           </Button>
-          <Button variant="outline" onClick={handleExportExcel}>
+          <Button variant="outline" onClick={exportExcel}>
             <Download className="h-4 w-4 mr-2" /> Excel
           </Button>
-          <Button onClick={() => handleDialogOpen()}>
+          <Button onClick={() => openDialog()}>
             <Plus className="h-4 w-4 mr-2" /> Add Bus
           </Button>
         </div>
@@ -153,11 +157,10 @@ export default function Buses() {
         <Table>
           <TableHeader>
             <TableRow>
-              {["Name", "Plate Number", "Route", "Capacity", "Status"].map((col) => (
-                <TableHead key={col} onClick={() => handleSort(col.toLowerCase())}>
-                  {col}{" "}
-                  {sortConfig.key === col.toLowerCase() &&
-                    (sortConfig.direction === "asc" ? "▲" : "▼")}
+              {["name", "plateNumber", "route", "capacity", "isMoving"].map((col) => (
+                <TableHead key={col} onClick={() => handleSort(col as keyof Bus)}>
+                  {col.charAt(0).toUpperCase() + col.slice(1)}{" "}
+                  {sortConfig.key === col && (sortConfig.direction === "asc" ? "▲" : "▼")}
                 </TableHead>
               ))}
               <TableHead>Actions</TableHead>
@@ -185,21 +188,23 @@ export default function Buses() {
             ) : (
               paginatedBuses.map((bus) => (
                 <TableRow key={bus.id}>
-                  <TableCell className="font-medium">{bus.name}</TableCell>
-                  <TableCell>{bus.plateNumber}</TableCell>
-                  <TableCell>{bus.route}</TableCell>
-                  <TableCell>{bus.capacity}</TableCell>
+                  <TableCell className="font-medium">{bus.name ?? "-"}</TableCell>
+                  <TableCell>{bus.plateNumber ?? "-"}</TableCell>
+                  <TableCell>{bus.route ?? "-"}</TableCell>
+                  <TableCell>{bus.capacity ?? "-"}</TableCell>
                   <TableCell>
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        bus.isMoving ? "bg-red-500/10 text-red-500" : "bg-green-500/10 text-green-500"
+                        bus.isMoving
+                          ? "bg-red-500/10 text-red-500"
+                          : "bg-green-500/10 text-green-500"
                       }`}
                     >
                       {bus.isMoving ? "Moving" : "Stopped"}
                     </span>
                   </TableCell>
                   <TableCell className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => handleDialogOpen(bus)}>
+                    <Button size="sm" variant="outline" onClick={() => openDialog(bus)}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => handleDelete(bus.id)}>
@@ -216,7 +221,7 @@ export default function Buses() {
       {/* Pagination */}
       <div className="flex justify-between items-center mt-4">
         <span>
-          Page {currentPage} of {totalPages}
+          Page {currentPage} of {totalPages || 1}
         </span>
         <div className="flex gap-2">
           <Button disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>
@@ -225,18 +230,24 @@ export default function Buses() {
           <Button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
             Prev
           </Button>
-          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>
+          <Button
+            disabled={currentPage === totalPages || totalPages === 0}
+            onClick={() => setCurrentPage((p) => p + 1)}
+          >
             Next
           </Button>
-          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>
+          <Button
+            disabled={currentPage === totalPages || totalPages === 0}
+            onClick={() => setCurrentPage(totalPages)}
+          >
             Last
           </Button>
         </div>
       </div>
 
-      {/* Dialog for Add/Edit */}
+      {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogTrigger asChild></DialogTrigger>
+        <DialogTrigger asChild />
         <DialogContent className="max-w-lg">
           <AddBusForm
             bus={selectedBus}
