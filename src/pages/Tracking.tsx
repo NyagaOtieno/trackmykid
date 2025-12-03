@@ -14,6 +14,19 @@ import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import axios from "axios";
 
+// ---------------- Vehicle Type ----------------
+interface Vehicle {
+  ID: number;
+  LastLat: number | null;
+  LastLng: number | null;
+  lat: number;
+  lng: number;
+  speed: number;
+  direction: number;
+  plateNumber: string;
+  __fallback: boolean;
+}
+
 // ---------------- Fly to selected vehicle ----------------
 function FlyToLocation({ selectedVehicle }: { selectedVehicle: Vehicle | null }) {
   const map = useMap();
@@ -49,19 +62,6 @@ const createVehicleIcon = (vehicle: Vehicle) => {
     iconAnchor: [14, 12],
   });
 };
-
-// ---------------- Vehicle Type ----------------
-interface Vehicle {
-  ID: number;
-  LastLat: number | null;
-  LastLng: number | null;
-  lat: number;
-  lng: number;
-  speed: number;
-  direction: number;
-  plateNumber: string;
-  __fallback: boolean;
-}
 
 // ---------------- Coordinate Normalizer ----------------
 function normalizeCoordinates(v: any): Vehicle {
@@ -106,7 +106,10 @@ async function getBuses(): Promise<Vehicle[]> {
 
     const response = await axios.get(
       "https://mytrack-production.up.railway.app/api/devices/list",
-      { headers: { "X-API-Key": token } }
+      { 
+        headers: { "X-API-Key": token },
+        timeout: 7000, // 7 seconds timeout
+      }
     );
 
     const devices = response.data || [];
@@ -122,7 +125,8 @@ export default function Tracking() {
   const { data: buses = [], isLoading, refetch } = useQuery({
     queryKey: ["buses"],
     queryFn: getBuses,
-    refetchInterval: 5000,
+    refetchInterval: 10000, // fetch every 10s
+    retry: 1, // retry once if it fails
   });
 
   const [search, setSearch] = useState("");
@@ -156,6 +160,14 @@ export default function Tracking() {
 
   if (isLoading)
     return <div className="flex items-center justify-center h-[600px]">Loading map...</div>;
+
+  if (!buses.length)
+    return (
+      <div className="flex items-center justify-center h-[600px] text-red-500 flex-col gap-2">
+        Unable to load vehicle data.
+        <Button onClick={() => refetch()}>Retry</Button>
+      </div>
+    );
 
   return (
     <div className="space-y-6">
@@ -213,7 +225,11 @@ export default function Tracking() {
           {filteredLocations.map((bus) => {
             const positions = routesRef.current[bus.ID];
             return positions?.length ? (
-              <Polyline key={`poly-${bus.ID}`} positions={positions} pathOptions={{ color: "blue", weight: 2 }} />
+              <Polyline
+                key={`poly-${bus.ID}`}
+                positions={positions}
+                pathOptions={{ color: "blue", weight: 2 }}
+              />
             ) : null;
           })}
 
