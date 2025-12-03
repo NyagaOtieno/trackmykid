@@ -99,39 +99,31 @@ function normalizeCoordinates(v: any): Vehicle {
   };
 }
 
-// ---------------- Fetch Devices ----------------
+// ---------------- Fetch Devices via Proxy ----------------
 async function getBuses(): Promise<Vehicle[]> {
   try {
-    const token = import.meta.env.VITE_PUBLIC_MYTRACK_API_KEY;
-
-    const response = await axios.get(
-      "https://mytrack-production.up.railway.app/api/devices/list",
-      { 
-        headers: { "X-API-Key": token },
-        timeout: 7000, // 7 seconds timeout
-      }
-    );
-
+    const response = await axios.get("/api/proxyDevices", { timeout: 7000 });
     const devices = response.data || [];
     return devices.map(normalizeCoordinates);
-  } catch (e) {
-    console.error("Error fetching devices:", e);
-    return [];
+  } catch (e: any) {
+    console.error("Error fetching devices:", e.message || e);
+    throw new Error("Unable to fetch vehicle data. Check your network or API key.");
   }
 }
 
 // ---------------- Main Component ----------------
 export default function Tracking() {
-  const { data: buses = [], isLoading, refetch } = useQuery({
-    queryKey: ["buses"],
-    queryFn: getBuses,
-    refetchInterval: 10000, // fetch every 10s
-    retry: 1, // retry once if it fails
-  });
-
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
   const routesRef = useRef<Record<number, [number, number][]>>({});
+
+  const { data: buses = [], isLoading, isError, refetch } = useQuery({
+    queryKey: ["buses"],
+    queryFn: getBuses,
+    refetchInterval: 10000, // fetch every 10s
+    retry: 2, // retry twice if it fails
+    onError: (err) => console.error("Query error:", err),
+  });
 
   // Filter search (case-insensitive)
   const filteredLocations = useMemo(() => {
@@ -139,7 +131,7 @@ export default function Tracking() {
     return buses.filter((v) => v.plateNumber.toLowerCase().includes(term));
   }, [buses, search]);
 
-  // Auto-center on a real location
+  // Auto-select first valid vehicle
   useEffect(() => {
     const realBus = filteredLocations.find((v) => !v.__fallback);
     setSelectedVehicle(realBus || filteredLocations[0] || null);
@@ -161,10 +153,18 @@ export default function Tracking() {
   if (isLoading)
     return <div className="flex items-center justify-center h-[600px]">Loading map...</div>;
 
+  if (isError)
+    return (
+      <div className="flex items-center justify-center h-[600px] text-red-500 flex-col gap-2">
+        Error loading vehicle data.
+        <Button onClick={() => refetch()}>Retry</Button>
+      </div>
+    );
+
   if (!buses.length)
     return (
       <div className="flex items-center justify-center h-[600px] text-red-500 flex-col gap-2">
-        Unable to load vehicle data.
+        No vehicles available.
         <Button onClick={() => refetch()}>Retry</Button>
       </div>
     );
