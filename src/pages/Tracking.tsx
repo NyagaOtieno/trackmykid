@@ -106,7 +106,7 @@ async function fetchBuses(): Promise<Bus[]> {
 // ---------------- Fetch live GPS from MyTrack ----------------
 async function fetchVehicleLocation(plateNumber: string) {
   try {
-    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK_API_KEY; // Corrected
+    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK; // Corrected
     const trackApiUrl = import.meta.env.VITE_API_URL_TRACK;
 
     const response = await axios.get(`${trackApiUrl}/devices/list`, {
