@@ -9,30 +9,29 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"), // Allows "@/components/..."
     },
   },
-  base: "/", // Set base path for deployment; change if deploying under a subfolder
+  base: "/", // Set base path, change if deploying under subfolder
   server: {
     open: true, // Opens browser automatically on dev
-    port: 5173, // Dev server port
-    strictPort: true, // Fail if port is taken
+    port: 5173, // Optional: specify port
     proxy: {
-      // Proxy API calls to backend during development
+      // Example: proxy API calls to backend during development
       "/api": {
         target: "http://localhost:3000",
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/api/, "/api"), // optional, keeps path
       },
     },
   },
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true, // Optional: useful for debugging
+    sourcemap: true, // Optional: generate source maps for debugging
     rollupOptions: {
       input: path.resolve(__dirname, "index.html"), // SPA entry
       output: {
         manualChunks: {
-          react: ["react", "react-dom"], // Split vendor chunk
+          // Optional: split vendor chunks
+          react: ["react", "react-dom"],
         },
       },
     },
