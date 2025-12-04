@@ -1,34 +1,29 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+// Tracking.tsx
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-  useMap,
-} from "react-leaflet";
+import axios from "axios";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
-import axios from "axios";
 
-// ---------------- Vehicle Type ----------------
-interface Vehicle {
-  ID: number;
-  LastLat: number | null;
-  LastLng: number | null;
-  lat: number;
-  lng: number;
-  speed: number;
-  direction: number;
+interface Bus {
+  id: string;
   plateNumber: string;
-  __fallback: boolean;
+  route?: string;
+  driver?: { name?: string };
+  assistant?: { name?: string };
+  lat?: number | null;
+  lng?: number | null;
+  __fallback?: boolean;
+  direction?: number;
+  speed?: number;
+  movementState?: string;
 }
 
 // ---------------- Fly to selected vehicle ----------------
-function FlyToLocation({ selectedVehicle }: { selectedVehicle: Vehicle | null }) {
+function FlyToLocation({ selectedVehicle }: { selectedVehicle: Bus | null }) {
   const map = useMap();
   useEffect(() => {
     if (selectedVehicle?.lat != null && selectedVehicle?.lng != null) {
@@ -39,150 +34,155 @@ function FlyToLocation({ selectedVehicle }: { selectedVehicle: Vehicle | null })
 }
 
 // ---------------- Vehicle Icon ----------------
-const createVehicleIcon = (vehicle: Vehicle) => {
-  const color =
-    vehicle.speed === 0
-      ? "#6c757d"
-      : vehicle.speed < 50
-      ? "#28a745"
-      : vehicle.speed < 80
-      ? "#ffc107"
-      : "#dc3545";
+const createVehicleIcon = (bus: Bus) => {
+  const color = bus.__fallback
+    ? "#6c757d"
+    : bus.movementState?.toLowerCase() === "standing"
+    ? "#28a745"
+    : "#dc3545";
 
   return L.divIcon({
-    html: `<div style="
-      transform: rotate(${vehicle.direction || 0}deg);
-      display:flex; align-items:center; justify-content:center;
-      background:${color}; color:white; font-size:10px; font-weight:bold;
-      border-radius:4px; border:1px solid #fff; padding:2px 4px;
-      min-width:28px; height:24px; white-space:nowrap;
-    ">🚍 ${vehicle.plateNumber}</div>`,
+    html: `
+      <div style="
+        transform: rotate(${bus.direction || 0}deg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: ${color};
+        color: white;
+        font-size: 10px;
+        font-weight: bold;
+        border-radius: 4px;
+        border: 1px solid #fff;
+        padding: 2px 4px;
+        min-width: 26px;
+        height: 24px;
+        white-space: nowrap;
+      ">🚍 ${bus.plateNumber}</div>
+    `,
     className: "",
     iconSize: [28, 24],
     iconAnchor: [14, 12],
   });
 };
 
-// ---------------- Coordinate Normalizer ----------------
-function normalizeCoordinates(v: any): Vehicle {
-  let lat = v.LastLat != null ? Number(v.LastLat) : null;
-  let lng = v.LastLng != null ? Number(v.LastLng) : null;
+// ---------------- Normalize Coordinates ----------------
+function normalizeCoordinates(bus: Bus) {
+  let lat = bus.lat != null ? Number(bus.lat) : null;
+  let lng = bus.lng != null ? Number(bus.lng) : null;
+  let fallback = false;
 
-  if (lat === null || lng === null) {
-    return {
-      ...v,
-      lat: -1.2921,
-      lng: 36.8219,
-      __fallback: true,
-      direction: 0,
-      speed: 0,
-      plateNumber: v.VehicleNo || "Unknown",
-      ID: v.ID,
-      LastLat: v.LastLat,
-      LastLng: v.LastLng,
-    };
-  }
-
+  if (lat === null || lng === null) fallback = true;
   if (lat > 5 && lng < 5) [lat, lng] = [lng, lat];
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) fallback = true;
+
+  const kenyaLat = lat! > -5 && lat! < 5;
+  const kenyaLng = lng! > 34 && lng! < 42;
+
+  if (!kenyaLat || !kenyaLng) fallback = true;
 
   return {
-    ...v,
-    lat,
-    lng,
-    __fallback: false,
-    direction: Number(v.direction || 0),
-    speed: Number(v.speed || 0),
-    plateNumber: v.VehicleNo || "Unknown",
-    ID: v.ID,
-    LastLat: v.LastLat,
-    LastLng: v.LastLng,
+    ...bus,
+    lat: fallback ? -1.2921 : lat,
+    lng: fallback ? 36.8219 : lng,
+    __fallback: fallback,
+    direction: Number(bus.direction || 0),
+    speed: Number(bus.speed || 0),
   };
 }
 
-// ---------------- Fetch Devices ----------------
-async function getBuses(): Promise<Vehicle[]> {
+// ---------------- Fetch buses (your backend) ----------------
+async function fetchBuses(): Promise<Bus[]> {
+  const token = sessionStorage.getItem("token");
+  const apiUrl = import.meta.env.VITE_API_URL;
+
+  const response = await axios.get(`${apiUrl}/buses`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return response.data || [];
+}
+
+// ---------------- Fetch live GPS from MyTrack ----------------
+async function fetchVehicleLocation(plateNumber: string) {
   try {
-    const token = import.meta.env.VITE_PUBLIC_MYTRACK_API_KEY;
+    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK_API_KEY;
+    const trackApiUrl = import.meta.env.VITE_API_URL_TRACK;
 
-    const response = await axios.get(
-      "https://mytrack-production.up.railway.app/api/devices/list",
-      { 
-        headers: { "X-API-Key": token },
-        timeout: 7000, // 7 seconds timeout
-      }
-    );
+    const response = await axios.get(`${trackApiUrl}/devices/list`, {
+      headers: { "X-API-Key": apiKey },
+    });
 
-    const devices = response.data || [];
-    return devices.map(normalizeCoordinates);
+    const device = response.data.find((d: any) => d.VehicleNo === plateNumber);
+
+    if (!device) return { lat: null, lng: null };
+
+    return {
+      lat: Number(device.LastLat),
+      lng: Number(device.LastLng),
+    };
   } catch (e) {
-    console.error("Error fetching devices:", e);
-    return [];
+    console.error("Error fetching vehicle location:", e);
+    return { lat: null, lng: null };
   }
+}
+
+// ---------------- Merge buses + GPS ----------------
+async function getBusesWithLocations(): Promise<Bus[]> {
+  const buses = await fetchBuses();
+
+  const withLocations = await Promise.all(
+    buses.map(async (bus) => {
+      const { lat, lng } = await fetchVehicleLocation(bus.plateNumber);
+      return normalizeCoordinates({ ...bus, lat, lng });
+    })
+  );
+
+  return withLocations;
 }
 
 // ---------------- Main Component ----------------
 export default function Tracking() {
   const { data: buses = [], isLoading, refetch } = useQuery({
-    queryKey: ["buses"],
-    queryFn: getBuses,
-    refetchInterval: 10000, // fetch every 10s
-    retry: 1, // retry once if it fails
+    queryKey: ["busesWithLocations"],
+    queryFn: getBusesWithLocations,
+    refetchInterval: 5000,
   });
 
   const [search, setSearch] = useState("");
-  const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
-  const routesRef = useRef<Record<number, [number, number][]>>({});
+  const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
 
-  // Filter search (case-insensitive)
-  const filteredLocations = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return buses.filter((v) => v.plateNumber.toLowerCase().includes(term));
+  const filteredBuses = useMemo(() => {
+    return buses.filter((bus) =>
+      bus.plateNumber.toLowerCase().includes(search.toLowerCase())
+    );
   }, [buses, search]);
 
-  // Auto-center on a real location
   useEffect(() => {
-    const realBus = filteredLocations.find((v) => !v.__fallback);
-    setSelectedVehicle(realBus || filteredLocations[0] || null);
-  }, [filteredLocations]);
-
-  // Update route history for polylines
-  useEffect(() => {
-    if (!selectedVehicle) return;
-    const busId = selectedVehicle.ID;
-    if (!routesRef.current[busId]) routesRef.current[busId] = [];
-    routesRef.current[busId].push([selectedVehicle.lat, selectedVehicle.lng]);
-    if (routesRef.current[busId].length > 50) routesRef.current[busId].shift();
-  }, [selectedVehicle]);
+    const realBus = filteredBuses.find((b) => !b.__fallback);
+    setSelectedVehicle(realBus || filteredBuses[0] || null);
+  }, [filteredBuses]);
 
   const center: [number, number] = selectedVehicle
-    ? [selectedVehicle.lat, selectedVehicle.lng]
+    ? [selectedVehicle.lat!, selectedVehicle.lng!]
     : [-1.2921, 36.8219];
 
   if (isLoading)
-    return <div className="flex items-center justify-center h-[600px]">Loading map...</div>;
-
-  if (!buses.length)
     return (
-      <div className="flex items-center justify-center h-[600px] text-red-500 flex-col gap-2">
-        Unable to load vehicle data.
-        <Button onClick={() => refetch()}>Retry</Button>
+      <div className="flex items-center justify-center h-[600px]">
+        Loading map...
       </div>
     );
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
-          <p className="text-muted-foreground mt-1">Real-time tracking for all vehicles</p>
-        </div>
+        <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
         <div className="text-sm text-muted-foreground">
           Last update: {new Date().toLocaleTimeString()}
         </div>
       </div>
 
-      {/* Search */}
       <div className="flex gap-2 items-center">
         <Input
           placeholder="Search plate number..."
@@ -193,73 +193,59 @@ export default function Tracking() {
         <Button onClick={() => refetch()}>Refresh</Button>
       </div>
 
-      {/* Map */}
       <div className="bg-card rounded-lg border overflow-hidden h-[600px]">
         <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }}>
           <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
+            attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {filteredLocations.map((bus) =>
-            bus.lat != null && bus.lng != null ? (
-              <Marker
-                key={bus.ID}
-                position={[bus.lat, bus.lng]}
-                icon={createVehicleIcon(bus)}
-                eventHandlers={{ click: () => setSelectedVehicle(bus) }}
-              >
-                <Popup>
-                  <div className="p-2">
-                    <h3 className="font-bold">{bus.plateNumber}</h3>
-                    <p>Lat: {bus.lat?.toFixed(5) ?? "N/A"}</p>
-                    <p>Lng: {bus.lng?.toFixed(5) ?? "N/A"}</p>
-                    <p>Speed: {bus.speed ?? 0} km/h</p>
-                  </div>
-                </Popup>
-              </Marker>
-            ) : null
-          )}
-
-          {/* Polylines */}
-          {filteredLocations.map((bus) => {
-            const positions = routesRef.current[bus.ID];
-            return positions?.length ? (
-              <Polyline
-                key={`poly-${bus.ID}`}
-                positions={positions}
-                pathOptions={{ color: "blue", weight: 2 }}
-              />
-            ) : null;
-          })}
+          {filteredBuses.map((bus) => (
+            <Marker
+              key={bus.id}
+              position={[bus.lat!, bus.lng!]}
+              icon={createVehicleIcon(bus)}
+              eventHandlers={{ click: () => setSelectedVehicle(bus) }}
+            >
+              <Popup>
+                <div className="p-2">
+                  <h3 className="font-bold">{bus.plateNumber}</h3>
+                  <p>Lat: {bus.lat?.toFixed(5)}</p>
+                  <p>Lng: {bus.lng?.toFixed(5)}</p>
+                  <p>Route: {bus.route || "N/A"}</p>
+                  <p>Driver: {bus.driver?.name || "N/A"}</p>
+                  <p>Assistant: {bus.assistant?.name || "N/A"}</p>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
 
           <FlyToLocation selectedVehicle={selectedVehicle} />
         </MapContainer>
       </div>
 
-      {/* Vehicle List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredLocations.map((bus) => (
+        {filteredBuses.map((bus) => (
           <div
-            key={bus.ID}
+            key={bus.id}
             className={`bg-card border rounded-lg p-4 cursor-pointer hover:bg-accent ${
-              selectedVehicle?.ID === bus.ID ? "border-primary" : ""
+              selectedVehicle?.id === bus.id ? "border-primary" : ""
             }`}
             onClick={() => setSelectedVehicle(bus)}
           >
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-semibold">{bus.plateNumber}</h3>
-                <p className="text-sm text-muted-foreground">Speed: {bus.speed} km/h</p>
+                <p className="text-sm text-muted-foreground">
+                  Driver: {bus.driver?.name || "N/A"}
+                </p>
               </div>
               <div
                 className={`h-3 w-3 rounded-full ${
-                  bus.speed === 0
+                  bus.__fallback
                     ? "bg-gray-500"
-                    : bus.speed < 50
+                    : bus.movementState?.toLowerCase() === "standing"
                     ? "bg-green-500"
-                    : bus.speed < 80
-                    ? "bg-yellow-500"
                     : "bg-red-500"
                 }`}
               />
