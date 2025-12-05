@@ -144,6 +144,33 @@ async function getBusesWithLocations(): Promise<Bus[]> {
 
 // ---------------- Main Component ----------------
 export default function Tracking() {
+  export default function Tracking() {
+  // ----------- TEST MyTrack API (top of component) -----------
+  useEffect(() => {
+    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK;
+    const trackApiUrl = import.meta.env.VITE_API_URL_TRACK;
+
+    console.log("Testing MyTrack API...", { apiKey, trackApiUrl });
+
+    axios.get(`${trackApiUrl}/devices/list`, {
+      headers: { "X-API-Key": apiKey }
+    })
+    .then(res => console.log("MyTrack GET response:", res.data))
+    .catch(err => console.error("MyTrack GET error:", err));
+  }, []); // empty dependency array => runs once on mount
+  // ----------------------------------------------------------
+
+  const { data: buses = [], isLoading, refetch } = useQuery({
+    queryKey: ["busesWithLocations"],
+    queryFn: getBusesWithLocations,
+    refetchInterval: 5000,
+  });
+
+  const [search, setSearch] = useState("");
+  const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
+
+  // ...rest of your Tracking component
+
   const { data: buses = [], isLoading, refetch } = useQuery({
     queryKey: ["busesWithLocations"],
     queryFn: getBusesWithLocations,
