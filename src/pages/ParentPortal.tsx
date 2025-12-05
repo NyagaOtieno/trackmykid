@@ -1,6 +1,6 @@
 // ParentPortal.tsx
 import { useQuery } from "@tanstack/react-query";
-import { MapPin, Bus } from "lucide-react";
+import { MapPin, Bus, GraduationCap } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import {
   Card,
@@ -15,24 +15,26 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useMemo, useEffect } from "react";
 
-/* ---------------- Bus Icons (🚍 style) ---------------- */
+/* ---------------- BUS ICONS FOR MAP ---------------- */
 const busIconGreen = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61439.png", // green bus
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
-const busIconRed = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61437.png", // red bus
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
-});
-const busIconGray = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61436.png", // gray bus
-  iconSize: [32, 32],
-  iconAnchor: [16, 32],
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202926.png", // moving
+  iconSize: [42, 42],
+  iconAnchor: [21, 42],
 });
 
-/* ---------------- Auto-fit map bounds component ---------------- */
+const busIconRed = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202927.png", // stopped
+  iconSize: [42, 42],
+  iconAnchor: [21, 42],
+});
+
+const busIconGray = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202928.png", // unknown
+  iconSize: [42, 42],
+  iconAnchor: [21, 42],
+});
+
+/* ---------------- AUTO-FIT MAP BOUNDS ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   const map = useMap();
   useEffect(() => {
@@ -42,19 +44,18 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
-const STUDENTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/students";
-const MANIFESTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/manifests";
-const BUSES_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/buses";
-const USERS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/users";
-const TRACKING_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/tracking/bus-locations";
+const API = import.meta.env.VITE_API_URL;
+const TRACKING = import.meta.env.VITE_PUBLIC_MYTRACK;
+
+const STUDENTS_ENDPOINT = `${API}/students`;
+const MANIFESTS_ENDPOINT = `${API}/manifests`;
+const BUSES_ENDPOINT = `${API}/buses`;
+const USERS_ENDPOINT = `${API}/users`;
+const TRACKING_ENDPOINT = `https://mytrack-production.up.railway.app/api/devices/list`;
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
+
 type Manifest = {
   id: number;
   studentId: number;
@@ -66,10 +67,10 @@ type Manifest = {
   boardingTime?: string | null;
   alightingTime?: string | null;
   status?: string | null;
-  session?: string | null;
   student?: any;
   bus?: any;
 };
+
 type BusItem = {
   id: number;
   name?: string;
@@ -80,17 +81,26 @@ type BusItem = {
   driver?: any | null;
   assistant?: any | null;
 };
-type UserItem = { id: number; name?: string; role?: string; phone?: string | null };
-type DeviceItem = {
-  busId: number;
-  plateNumber?: string;
-  lat?: number | null;
-  lng?: number | null;
-  movementState?: string | null;
-  lastUpdate?: string;
-  [k: string]: any;
+
+type UserItem = {
+  id: number;
+  name?: string;
+  role?: string;
+  phone?: string | null;
 };
 
+type DeviceItem = {
+  ID: number;
+  IMEI?: string;
+  SIM?: string;
+  VehicleNo?: string;
+  ChassisNo?: string;
+  LastLat?: number;
+  LastLng?: number;
+  lastUpdate?: string;
+  movementState?: string;
+};
+/* ---------------- MAIN COMPONENT ---------------- */
 export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
@@ -107,112 +117,118 @@ export default function ParentPortal() {
     queryKey: ["students"],
     queryFn: async () => {
       const res = await fetch(STUDENTS_ENDPOINT);
-      if (!res.ok) throw new Error("Failed to fetch students");
       const json = await res.json();
-      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      return Array.isArray(json) ? json : json?.data ?? [];
     },
     refetchInterval: 15000,
   });
-  const students: Student[] = Array.isArray(studentsData) ? studentsData : [];
+
+  const students: Student[] = studentsData ?? [];
+
   const myStudents = students.filter(
     (s: any) =>
       (s.parent?.user?.id && s.parent?.user?.id === parentUserId) ||
       (s.parentId && s.parentId === parentUserId)
   );
 
-  const { data: manifestsData } = useQuery<Manifest[]>({
-    queryKey: ["manifests", parentUserId],
+  const { data: manifestsData } = useQuery({
+    queryKey: ["manifests"],
     queryFn: async () => {
       const res = await fetch(MANIFESTS_ENDPOINT);
-      if (!res.ok) throw new Error("Failed to fetch manifests");
       const json = await res.json();
-      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      return Array.isArray(json) ? json : json?.data ?? [];
     },
     refetchInterval: 15000,
     keepPreviousData: true,
   });
-  const manifests: Manifest[] = Array.isArray(manifestsData) ? manifestsData : [];
 
-  const { data: busesData } = useQuery<BusItem[]>({
+  const manifests: Manifest[] = manifestsData ?? [];
+
+  const { data: busesData } = useQuery({
     queryKey: ["buses"],
     queryFn: async () => {
       const res = await fetch(BUSES_ENDPOINT);
-      if (!res.ok) return [];
       const json = await res.json();
-      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      return Array.isArray(json) ? json : json?.data ?? [];
     },
     refetchInterval: 30000,
   });
-  const buses: BusItem[] = Array.isArray(busesData) ? busesData : [];
 
-  const { data: usersData } = useQuery<UserItem[]>({
+  const buses: BusItem[] = busesData ?? [];
+
+  const { data: usersData } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await fetch(USERS_ENDPOINT);
-      if (!res.ok) return [];
       const json = await res.json();
-      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      return Array.isArray(json) ? json : json?.data ?? [];
     },
     refetchInterval: 30000,
   });
-  const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 
-  /* ---------------- FETCH LIVE BUS LOCATIONS ---------------- */
-  const { data: busLocationsRaw } = useQuery<DeviceItem[]>({
+  const users: UserItem[] = usersData ?? [];
+
+  const { data: busLocationsRaw } = useQuery({
     queryKey: ["busLocations"],
     queryFn: async () => {
-      const token = sessionStorage.getItem("token");
-      const res = await fetch(TRACKING_ENDPOINT, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return [];
-      const json = await res.json();
-      return Array.isArray(json?.data) ? json.data : [];
+      try {
+        const res = await fetch(TRACKING_ENDPOINT, {
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": TRACKING,
+          },
+        });
+        if (!res.ok) return [];
+        const json = await res.json();
+        return Array.isArray(json) ? json : json?.data ?? [];
+      } catch {
+        return [];
+      }
     },
     refetchInterval: 15000,
   });
-  const busLocations: DeviceItem[] = Array.isArray(busLocationsRaw) ? busLocationsRaw : [];
 
-  /* ---------------- HELPER MAPS ---------------- */
+  const busLocations: DeviceItem[] = busLocationsRaw ?? [];
+
+  /* ---------------- MAP HELPERS ---------------- */
   const busesById = useMemo(() => {
     const map = new Map<number, BusItem>();
-    for (const b of buses) if (b?.id != null) map.set(Number(b.id), b);
+    buses.forEach((b) => b.id && map.set(b.id, b));
     return map;
   }, [buses]);
 
   const usersById = useMemo(() => {
     const map = new Map<number, UserItem>();
-    for (const u of users) if (u?.id != null) map.set(Number(u.id), u);
+    users.forEach((u) => u.id && map.set(u.id, u));
     return map;
   }, [users]);
 
   const busLocationsByPlate = useMemo(() => {
     const map = new Map<string, DeviceItem>();
-    for (const d of busLocations) {
-      const key = (d.plateNumber ?? "").toString().trim().replace(/\s+/g, "").toUpperCase();
+    busLocations.forEach((d) => {
+      const key = d.VehicleNo?.trim().replace(/\s+/g, "").toUpperCase();
       if (key) map.set(key, d);
-    }
+    });
     return map;
   }, [busLocations]);
 
   const latestManifestByStudent = useMemo(() => {
     const map = new Map<number, Manifest>();
-    const sorted = manifests.slice().sort((a, b) => {
-      const da = a.date ? new Date(a.date).getTime() : 0;
-      const db = b.date ? new Date(b.date).getTime() : 0;
-      return db - da;
-    });
-    for (const m of sorted) {
+    const sorted = manifests.sort(
+      (a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()
+    );
+    sorted.forEach((m) => {
       const sid = m.studentId ?? m.student?.id;
       if (sid && !map.has(sid)) map.set(sid, m);
-    }
+    });
     return map;
   }, [manifests]);
 
+  /* ---------------- BUILD STUDENT VIEWS ---------------- */
   type StudentView = {
     student: Student;
-    manifest?: Manifest | undefined;
-    status: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN";
+    manifest?: Manifest;
+    status: string;
     lat?: number;
     lon?: number;
     readableLocation: string;
@@ -221,59 +237,39 @@ export default function ParentPortal() {
     driver?: string;
     assistant?: string;
     lastSeen?: string;
-    liveSource?: "device" | "manifest" | "student";
     movementState?: string;
+    showOnMap?: boolean;
   };
 
-  const studentViews: StudentView[] = myStudents.map((s: any) => {
+  const studentViews: StudentView[] = myStudents.map((s) => {
     const latest = latestManifestByStudent.get(s.id);
-    const busCandidate =
-      latest?.bus ?? s.bus ?? (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined);
+    if (!latest)
+      return { student: s, status: "UNKNOWN", readableLocation: "No manifest" };
 
-    const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
-    const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase();
+    const bus =
+      latest.bus ?? s.bus ?? (latest.busId ? busesById.get(latest.busId) : undefined);
 
-    let lat: number | undefined = undefined;
-    let lon: number | undefined = undefined;
-    let readableLocation = "Location unavailable";
-    let liveSource: StudentView["liveSource"] = "student";
-    let lastSeen: string | undefined = undefined;
-    let movementState: string | undefined = undefined;
+    const plate = bus?.plateNumber?.trim() ?? "";
+    const plateKey = plate.replace(/\s+/g, "").toUpperCase();
+    const device = busLocationsByPlate.get(plateKey);
 
-    // Match device by plate
-    let deviceMatch = busLocationsByPlate.get(plateKey);
-
-    if (deviceMatch && deviceMatch.lat != null && deviceMatch.lng != null) {
-      lat = Number(deviceMatch.lat);
-      lon = Number(deviceMatch.lng);
-      readableLocation = s.name; // show student name instead of plate
-      liveSource = "device";
-      lastSeen = deviceMatch.lastUpdate;
-      movementState = deviceMatch.movementState ?? "unknown";
+    let lat, lon, movementState, lastSeen;
+    if (device?.LastLat && device?.LastLng) {
+      lat = Number(device.LastLat);
+      lon = Number(device.LastLng);
+      movementState = device.movementState ?? "unknown";
+      lastSeen = device.lastUpdate ?? "";
     }
 
-    if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
-      lat = Number(latest.latitude);
-      lon = Number(latest.longitude);
-      readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
-      liveSource = "manifest";
-      movementState = "unknown";
-    }
+    const driver =
+      bus?.driver?.name ?? (bus?.driverId ? usersById.get(bus.driverId)?.name : "N/A");
+    const assistant =
+      bus?.assistant?.name ?? (bus?.assistantId ? usersById.get(bus.assistantId)?.name : "N/A");
 
-    const driverName =
-      busCandidate?.driver?.name ?? (busCandidate?.driverId ? usersById.get(Number(busCandidate.driverId))?.name : undefined) ?? "N/A";
-    const assistantName =
-      busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
-
-    let status: StudentView["status"] = "UNKNOWN";
-    if (latest?.status) {
-      const st = (latest.status ?? "").toString().toUpperCase();
-      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
-      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
-    } else {
-      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
-      else if (latest?.alightingTime) status = "CHECKED_OUT";
-    }
+    let status = "UNKNOWN";
+    const st = latest.status?.toUpperCase();
+    if (["CHECKED_IN", "ONBOARDED"].includes(st)) status = "CHECKED_IN";
+    else if (["CHECKED_OUT"].includes(st)) status = "CHECKED_OUT";
 
     return {
       student: s,
@@ -281,36 +277,30 @@ export default function ParentPortal() {
       status,
       lat,
       lon,
-      readableLocation,
-      busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
-      plate: rawPlate || "N/A",
-      driver: driverName,
-      assistant: assistantName,
+      readableLocation: s.name,
+      busName: bus?.name ?? "No Bus Assigned",
+      plate,
+      driver,
+      assistant,
       lastSeen,
-      liveSource,
       movementState,
+      showOnMap: lat && lon && status === "CHECKED_IN",
     };
   });
 
-  const markersWithCoords = studentViews.filter(
-    (v) =>
-      v.lat != null &&
-      v.lon != null &&
-      v.lat >= -90 &&
-      v.lat <= 90 &&
-      v.lon >= -180 &&
-      v.lon <= 180
-  );
-  const bounds = markersWithCoords.length
-    ? L.latLngBounds(markersWithCoords.map((v) => [v.lat!, v.lon!]))
-    : null;
+  const markers = studentViews.filter((v) => v.showOnMap);
+
+  const bounds =
+    markers.length > 0
+      ? L.latLngBounds(markers.map((v) => [v.lat!, v.lon!]))
+      : null;
 
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   };
-
+  /* ---------------- RENDER ---------------- */
   return (
     <div className="min-h-screen bg-muted/30">
       <header className="bg-card border-b p-4">
@@ -319,6 +309,7 @@ export default function ParentPortal() {
             <Bus className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-bold">Parent Portal</h1>
           </div>
+
           <div>
             <span className="mr-4 text-sm text-muted-foreground">
               Welcome, {currentUser?.name}
@@ -334,6 +325,7 @@ export default function ParentPortal() {
       </header>
 
       <main className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* ---------------- STUDENT CARDS ---------------- */}
         <div>
           <h2 className="text-2xl font-bold">My Children</h2>
           <p className="text-sm text-muted-foreground">
@@ -351,91 +343,105 @@ export default function ParentPortal() {
               No students found for your account.
             </Card>
           ) : (
-            studentViews.map((v) => {
-              const s = v.student;
-              const manifest = v.manifest;
-              const statusLabel =
-                v.status === "CHECKED_IN"
-                  ? "Boarded (On Bus)"
-                  : v.status === "CHECKED_OUT"
-                  ? "Offboarded (Checked Out)"
-                  : "Not Onboarded";
+            studentViews.map((v) => (
+              <Card key={v.student.id}>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="h-5 w-5 text-primary" />
+                    <CardTitle>{v.student.name}</CardTitle>
+                  </div>
+                  <CardDescription>
+                    {v.student.grade ?? v.student.className ?? "Grade N/A"}
+                  </CardDescription>
+                </CardHeader>
 
-              return (
-                <Card key={s.id}>
-                  <CardHeader>
-                    <CardTitle>{s.name}</CardTitle>
-                    <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex gap-2">
-                      <Bus className="h-4 w-4 text-primary" />
-                      <div>
-                        <div>{v.busName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Plate: {v.plate}
-                        </div>
+                <CardContent className="space-y-3">
+                  <div className="flex gap-2">
+                    <Bus className="h-4 w-4 text-primary" />
+                    <div>
+                      <div>{v.busName}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Plate: {v.plate}
                       </div>
                     </div>
+                  </div>
 
-                    <div className="flex gap-2">
-                      <MapPin className="h-4 w-4 text-accent" />
+                  <div className="flex gap-2">
+                    <MapPin className="h-4 w-4 text-accent" />
+                    <div>
                       <div>
-                        <div>{statusLabel}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {v.readableLocation}
-                          {v.lastSeen ? ` — last seen: ${fmt(v.lastSeen)}` : ""}
-                          {v.movementState ? ` — Movement: ${v.movementState}` : ""}
-                        </div>
+                        {v.status === "CHECKED_IN"
+                          ? "Boarded (On Bus)"
+                          : v.status === "CHECKED_OUT"
+                          ? "Offboarded"
+                          : "Not Onboarded"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {v.readableLocation}
+                        {v.lastSeen && ` — Last seen: ${fmt(v.lastSeen)}`}
+                        {v.movementState && ` — Movement: ${v.movementState}`}
                       </div>
                     </div>
+                  </div>
 
-                    <div className="text-xs text-muted-foreground space-y-1 mt-3">
-                      <p>Driver: {v.driver ?? "N/A"}</p>
-                      <p>Assistant: {v.assistant ?? "N/A"}</p>
-                      <p>
-                        Boarding: {fmt(manifest?.boardingTime)}
-                        {" | "}Alighting: {fmt(manifest?.alightingTime)}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
+                  <div className="text-xs text-muted-foreground space-y-1 mt-3">
+                    <p>Driver: {v.driver}</p>
+                    <p>Assistant: {v.assistant}</p>
+                    <p>
+                      Boarding: {fmt(v.manifest?.boardingTime)} | Alighting:{" "}
+                      {fmt(v.manifest?.alightingTime)}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
           )}
         </div>
 
+        {/* ---------------- MAP ---------------- */}
         <div className="h-[500px]">
           <MapContainer
-            center={[-1, 36]}
-            zoom={4}
+            center={[-1.28, 36.83]}
+            zoom={13}
             style={{ width: "100%", height: "100%" }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <FitBounds bounds={bounds} />
 
-            {markersWithCoords.map((v) => {
-              // Default gray bus
-              let icon = busIconGray;
-              if (v.movementState === "moving") icon = busIconGreen;
-              else if (v.movementState === "stopped") icon = busIconRed;
+            {/* ---------------- MARKERS ---------------- */}
+            {markers.map((v) => {
+              const icon =
+                v.movementState === "moving"
+                  ? busIconGreen
+                  : v.movementState === "stopped"
+                  ? busIconRed
+                  : busIconGray;
 
+              // Only show **assigned buses** on map
               return (
-                <Marker
-                  key={v.student.id}
-                  position={[Number(v.lat!), Number(v.lon!)]}
-                  icon={icon}
-                >
+                <Marker key={v.student.id} position={[v.lat!, v.lon!]} icon={icon}>
                   <Popup>
-                    <div className="space-y-1">
-                      <strong>{v.student.name}</strong>
-                      <div>{v.busName}</div>
+                    <div className="space-y-2">
+                      <strong>{v.busName}</strong>
                       <div>Status: {v.status}</div>
-                      <div>{v.readableLocation}</div>
                       <div>Driver: {v.driver}</div>
                       <div>Assistant: {v.assistant}</div>
                       {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
-                      {v.movementState && <div>Bus Movement: {v.movementState}</div>}
+                      {v.movementState && <div>Movement: {v.movementState}</div>}
+                      <div className="mt-2 font-semibold">Children on this bus:</div>
+                      <ul className="list-disc pl-5">
+                        {studentViews
+                          .filter(
+                            (s) =>
+                              s.plate === v.plate && s.status === "CHECKED_IN"
+                          )
+                          .map((s) => (
+                            <li key={s.student.id}>
+                              <GraduationCap className="inline h-4 w-4 mr-1 text-primary" />
+                              {s.student.name}
+                            </li>
+                          ))}
+                      </ul>
                     </div>
                   </Popup>
                 </Marker>

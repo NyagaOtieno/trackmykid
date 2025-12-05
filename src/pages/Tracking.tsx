@@ -34,7 +34,7 @@ function FlyToLocation({ selectedVehicle }: { selectedVehicle: Bus | null }) {
 }
 
 // ---------------- Vehicle Icon ----------------
-const createVehicleIcon = (bus: Bus) => {
+const createVehicleIcon = (bus: Bus, stackOffset = 0) => {
   const color = bus.__fallback
     ? "#6c757d"
     : bus.movementState?.toLowerCase() === "standing"
@@ -45,7 +45,7 @@ const createVehicleIcon = (bus: Bus) => {
     html: `
       <div style="
         transform: rotate(${bus.direction || 0}deg);
-        display: flex;
+        display: inline-flex;
         align-items: center;
         justify-content: center;
         background: ${color};
@@ -54,15 +54,18 @@ const createVehicleIcon = (bus: Bus) => {
         font-weight: bold;
         border-radius: 4px;
         border: 1px solid #fff;
-        padding: 2px 4px;
-        min-width: 26px;
-        height: 24px;
+        padding: 2px 6px;
         white-space: nowrap;
-      ">🚍 ${bus.plateNumber}</div>
+        line-height: 1;
+        position: relative;
+        top: -${stackOffset}px;
+      ">
+        🚍 ${bus.plateNumber}
+      </div>
     `,
     className: "",
-    iconSize: [28, 24],
-    iconAnchor: [14, 12],
+    iconSize: undefined,
+    iconAnchor: [15, 12 + stackOffset],
   });
 };
 
@@ -106,14 +109,13 @@ async function fetchBuses(): Promise<Bus[]> {
 // ---------------- Fetch live GPS from MyTrack ----------------
 async function fetchVehicleLocation(plateNumber: string) {
   try {
-    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK; // Corrected
+    const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK;
     const trackApiUrl = import.meta.env.VITE_API_URL_TRACK;
 
     const response = await axios.get(`${trackApiUrl}/devices/list`, {
       headers: { "X-API-Key": apiKey },
     });
 
-    // response.data is already an array
     const device = response.data.find((d: any) => d.VehicleNo === plateNumber);
 
     if (!device) return { lat: null, lng: null };
@@ -156,7 +158,7 @@ export default function Tracking() {
     })
     .then(res => console.log("MyTrack GET response:", res.data))
     .catch(err => console.error("MyTrack GET error:", err));
-  }, []); // empty dependency array => runs once on mount
+  }, []);
   // ----------------------------------------------------------
 
   const { data: buses = [], isLoading, refetch } = useQuery({
@@ -164,7 +166,6 @@ export default function Tracking() {
     queryFn: getBusesWithLocations,
     refetchInterval: 5000,
   });
-  
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
@@ -217,25 +218,41 @@ export default function Tracking() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {filteredBuses.map((bus) => (
-            <Marker
-              key={bus.id}
-              position={[bus.lat!, bus.lng!]}
-              icon={createVehicleIcon(bus)}
-              eventHandlers={{ click: () => setSelectedVehicle(bus) }}
-            >
-              <Popup>
-                <div className="p-2">
-                  <h3 className="font-bold">{bus.plateNumber}</h3>
-                  <p>Lat: {bus.lat?.toFixed(5)}</p>
-                  <p>Lng: {bus.lng?.toFixed(5)}</p>
-                  <p>Route: {bus.route || "N/A"}</p>
-                  <p>Driver: {bus.driver?.name || "N/A"}</p>
-                  <p>Assistant: {bus.assistant?.name || "N/A"}</p>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
+          {(() => {
+            // Group buses by lat/lng
+            const grouped: Record<string, Bus[]> = {};
+            filteredBuses.forEach((bus) => {
+              const key = `${bus.lat!.toFixed(5)}-${bus.lng!.toFixed(5)}`;
+              if (!grouped[key]) grouped[key] = [];
+              grouped[key].push(bus);
+            });
+
+            // Render markers with stacking offset
+            return Object.values(grouped).flatMap((group) =>
+              group.map((bus, i) => {
+                const stackOffset = i * 25; // vertical offset for stacking
+                return (
+                  <Marker
+                    key={bus.id}
+                    position={[bus.lat!, bus.lng!]}
+                    icon={createVehicleIcon(bus, stackOffset)}
+                    eventHandlers={{ click: () => setSelectedVehicle(bus) }}
+                  >
+                    <Popup>
+                      <div className="p-2">
+                        <h3 className="font-bold">{bus.plateNumber}</h3>
+                        <p>Lat: {bus.lat?.toFixed(5)}</p>
+                        <p>Lng: {bus.lng?.toFixed(5)}</p>
+                        <p>Route: {bus.route || "N/A"}</p>
+                        <p>Driver: {bus.driver?.name || "N/A"}</p>
+                        <p>Assistant: {bus.assistant?.name || "N/A"}</p>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })
+            );
+          })()}
 
           <FlyToLocation selectedVehicle={selectedVehicle} />
         </MapContainer>
