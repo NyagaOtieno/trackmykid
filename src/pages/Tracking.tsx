@@ -144,7 +144,6 @@ async function getBusesWithLocations(): Promise<Bus[]> {
 
 // ---------------- Main Component ----------------
 export default function Tracking() {
-  export default function Tracking() {
   // ----------- TEST MyTrack API (top of component) -----------
   useEffect(() => {
     const apiKey = import.meta.env.VITE_PUBLIC_MYTRACK;
@@ -165,17 +164,7 @@ export default function Tracking() {
     queryFn: getBusesWithLocations,
     refetchInterval: 5000,
   });
-
-  const [search, setSearch] = useState("");
-  const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
-
-  // ...rest of your Tracking component
-
-  const { data: buses = [], isLoading, refetch } = useQuery({
-    queryKey: ["busesWithLocations"],
-    queryFn: getBusesWithLocations,
-    refetchInterval: 5000,
-  });
+  
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
