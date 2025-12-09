@@ -571,53 +571,55 @@ export default function AssistantPortal() {
               <Badge>Current Location: {busLocation?.address ?? "N/A"}</Badge>
             </div>
 
-           {/* Map: only show when we have a busLocation */}
-{busLocation && (
-  <MapContainer
-    key={`${busLocation.lat}-${busLocation.lng}`} // forces re-center when coordinates change
-    center={mapCenter || [busLocation.lat, busLocation.lng]}
-    zoom={17}
-    scrollWheelZoom
-    style={{ height: "400px", width: "100%" }}
-  >
-    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {/* Map: only show when we have a busLocation */}
+            {busLocation && (
+              <MapContainer
+                key={`${busLocation.lat}-${busLocation.lng}`} // ensures Leaflet refreshes center when changed
+                center={mapCenter || [busLocation.lat, busLocation.lng]}
+                zoom={17}
+                scrollWheelZoom
+                style={{ height: "400px", width: "100%" }}
+              >
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                {/* Polyline for the route */}
+                {routePositions.length > 0 && (
+                  <Polyline
+                    positions={routePositions.filter((pos, i, arr) => i === 0 || pos[0] !== arr[i - 1][0] || pos[1] !== arr[i - 1][1])}
+                  />
+                )}
 
-    {/* Draw the route as a Polyline */}
-    {routePositions.length > 0 && (
-      <Polyline
-        positions={routePositions}
-        pathOptions={{ color: "blue", weight: 4, opacity: 0.7 }}
-      />
-    )}
+                {/* Markers for each route point */}
+                {routePositions.map((pos, idx) => (
+                  <Marker
+                    key={idx}
+                    position={pos}
+                    icon={
+                      idx === routePositions.length - 1
+                        ? new L.Icon({
+                            iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-red.png",
+                            iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+                            shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                          })
+                        : new L.Icon.Default()
+                    }
+                  >
+                    <Popup>
+                      {`Point ${idx + 1}`}<br />
+                      Lat: {pos[0]} <br />
+                      Lng: {pos[1]}
+                    </Popup>
+                  </Marker>
+                ))}
 
-    {/* Render markers for route points */}
-    {routePositions.map((pos, idx) => {
-      const isLast = idx === routePositions.length - 1;
-      const markerIcon = isLast
-        ? new L.Icon({
-            iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-red.png",
-            iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-            shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-            iconSize: [25, 41],
-            iconAnchor: [12, 41],
-          })
-        : new L.Icon.Default();
+                <AutoCenter center={mapCenter} />
+              </MapContainer>
+            )}
 
-      return (
-        <Marker key={idx} position={pos} icon={markerIcon}>
-          <Popup>
-            <div>
-              <strong>{isLast ? "Current Location" : `Point ${idx + 1}`}</strong>
-              <br />
-              Lat: {pos[0].toFixed(6)} <br />
-              Lng: {pos[1].toFixed(6)}
-            </div>
-          </Popup>
-        </Marker>
-      );
-    })}
-
-    <AutoCenter center={mapCenter} />
-  </MapContainer>
-)}
-
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
