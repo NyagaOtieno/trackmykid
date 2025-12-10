@@ -1,3 +1,4 @@
+
 // Tracking.tsx
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -5,8 +6,10 @@ import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Bus, User, UserCog, MapPin, Gauge, Navigation, Clock, AlertCircle } from "lucide-react";
 import "leaflet/dist/leaflet.css";
-import * as L from "leaflet";
+
 
 interface Bus {
   id: string;
@@ -21,7 +24,6 @@ interface Bus {
   speed?: number;
   movementState?: string;
 }
-
 // ---------------- Fly to selected vehicle ----------------
 function FlyToLocation({ selectedVehicle }: { selectedVehicle: Bus | null }) {
   const map = useMap();
@@ -185,6 +187,7 @@ export default function Tracking() {
     ? [selectedVehicle.lat!, selectedVehicle.lng!]
     : [-1.2921, 36.8219];
 
+
   if (isLoading)
     return (
       <div className="flex items-center justify-center h-[600px]">
@@ -195,6 +198,7 @@ export default function Tracking() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
+
         <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
         <div className="text-sm text-muted-foreground">
           Last update: {new Date().toLocaleTimeString()}
@@ -286,6 +290,7 @@ export default function Tracking() {
             </div>
           </div>
         ))}
+
       </div>
     </div>
   );

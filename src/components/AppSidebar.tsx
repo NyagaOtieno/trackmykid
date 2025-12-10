@@ -1,5 +1,5 @@
 import { Home, Map, Users, Bus, ClipboardList, UserCog, UsersRound, Settings, Truck } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
   Sidebar,
   SidebarContent,
@@ -26,6 +26,17 @@ const menuItems = [
 
 export function AppSidebar() {
   const { open } = useSidebar();
+  const location = useLocation();
+
+  // Helper function to check if a route is active
+  const isActiveRoute = (url: string) => {
+    if (url === '/dashboard') {
+      return location.pathname === '/dashboard';
+    }
+    // For other routes, check if the pathname starts with the URL
+    // This handles sub-routes like /buses/add highlighting /buses
+    return location.pathname.startsWith(url);
+  };
 
   return (
     <Sidebar className={open ? 'w-60' : 'w-14'}>
@@ -45,23 +56,26 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      className={({ isActive }) =>
-                        isActive
-                          ? 'bg-sidebar-accent text-sidebar-primary font-medium'
-                          : 'hover:bg-sidebar-accent/50'
-                      }
+              {menuItems.map((item) => {
+                const isActive = isActiveRoute(item.url);
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton 
+                      asChild 
+                      isActive={isActive}
+                      className={isActive ? "bg-sidebar-primary/20 text-sidebar-primary-foreground border-l-2 border-sidebar-primary" : ""}
                     >
-                      <item.icon className="h-4 w-4" />
-                      {open && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+                      <NavLink
+                        to={item.url}
+                        className="flex items-center gap-2"
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {open && <span>{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

@@ -1,7 +1,6 @@
 // ParentPortal.tsx
 import { useQuery } from "@tanstack/react-query";
-import { MapPin, Bus, GraduationCap } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+
 import {
   Card,
   CardContent,
@@ -9,30 +8,30 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useMemo, useEffect } from "react";
 
-/* ---------------- BUS ICONS FOR MAP ---------------- */
-const busIconGreen = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202926.png", // moving
-  iconSize: [42, 42],
-  iconAnchor: [21, 42],
-});
-
-const busIconRed = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202927.png", // stopped
-  iconSize: [42, 42],
-  iconAnchor: [21, 42],
-});
-
-const busIconGray = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/3202/3202928.png", // unknown
-  iconSize: [42, 42],
-  iconAnchor: [21, 42],
-});
 
 /* ---------------- AUTO-FIT MAP BOUNDS ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
@@ -43,15 +42,19 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   return null;
 }
 
-/* ---------------- API ENDPOINTS ---------------- */
-const API = import.meta.env.VITE_API_URL;
-const TRACKING = import.meta.env.VITE_PUBLIC_MYTRACK;
+/* ---------------- Fly to selected vehicle ---------------- */
+function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
+  const map = useMap();
+  useEffect(() => {
+    if (selectedVehicle?.lat != null && selectedVehicle?.lng != null) {
+      map.flyTo([selectedVehicle.lat, selectedVehicle.lng], 15, { animate: true, duration: 1.5 });
+    }
+  }, [selectedVehicle, map]);
+  return null;
+}
 
-const STUDENTS_ENDPOINT = `${API}/students`;
-const MANIFESTS_ENDPOINT = `${API}/manifests`;
-const BUSES_ENDPOINT = `${API}/buses`;
-const USERS_ENDPOINT = `${API}/users`;
-const TRACKING_ENDPOINT = `https://mytrack-production.up.railway.app/api/devices/list`;
+/* ---------------- API ENDPOINTS ---------------- */
+
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
@@ -100,16 +103,25 @@ type DeviceItem = {
   lastUpdate?: string;
   movementState?: string;
 };
-/* ---------------- MAIN COMPONENT ---------------- */
+
 export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+  // Mobile bottom sheet expansion state (collapsed by default to keep map primary)
+  const [showMobileDetails, setShowMobileDetails] = useState(false);
+  const [panicTriggerKey, setPanicTriggerKey] = useState(0);
 
   const handleLogout = () => {
     localStorage.removeItem("parent");
     localStorage.removeItem("token");
     navigate("/");
+  };
+
+  const triggerPanic = () => {
+    setPanicTriggerKey((k) => k + 1);
+    setShowMobileDetails(true);
   };
 
   /* ---------------- FETCH DATA ---------------- */
@@ -139,7 +151,6 @@ export default function ParentPortal() {
       return Array.isArray(json) ? json : json?.data ?? [];
     },
     refetchInterval: 15000,
-    keepPreviousData: true,
   });
 
   const manifests: Manifest[] = manifestsData ?? [];
@@ -224,24 +235,7 @@ export default function ParentPortal() {
     return map;
   }, [manifests]);
 
-  /* ---------------- BUILD STUDENT VIEWS ---------------- */
-  type StudentView = {
-    student: Student;
-    manifest?: Manifest;
-    status: string;
-    lat?: number;
-    lon?: number;
-    readableLocation: string;
-    busName?: string;
-    plate?: string;
-    driver?: string;
-    assistant?: string;
-    lastSeen?: string;
-    movementState?: string;
-    showOnMap?: boolean;
-  };
 
-  const studentViews: StudentView[] = myStudents.map((s) => {
     const latest = latestManifestByStudent.get(s.id);
     if (!latest)
       return { student: s, status: "UNKNOWN", readableLocation: "No manifest" };
@@ -295,28 +289,36 @@ export default function ParentPortal() {
       ? L.latLngBounds(markers.map((v) => [v.lat!, v.lon!]))
       : null;
 
+  // Default to first student on mobile list when nothing is selected
+  useEffect(() => {
+    if (!selectedStudentId && studentViews.length > 0) {
+      setSelectedStudentId(studentViews[0].student.id);
+    }
+  }, [selectedStudentId, studentViews]);
+
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   };
-  /* ---------------- RENDER ---------------- */
+
   return (
-    <div className="min-h-screen bg-muted/30">
-      <header className="bg-card border-b p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bus className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-bold">Parent Portal</h1>
+    <div className="min-h-screen bg-muted/30 flex flex-col">
+      <header className="bg-white border-b shadow-sm sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Car className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold text-foreground">Parent Portal</h1>
+              <p className="text-[11px] sm:text-xs text-muted-foreground">Live tracking & updates</p>
+            </div>
           </div>
 
-          <div>
-            <span className="mr-4 text-sm text-muted-foreground">
-              Welcome, {currentUser?.name}
-            </span>
             <button
               onClick={handleLogout}
-              className="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium text-sm sm:text-base"
             >
               Logout
             </button>
@@ -324,46 +326,25 @@ export default function ParentPortal() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* ---------------- STUDENT CARDS ---------------- */}
-        <div>
-          <h2 className="text-2xl font-bold">My Children</h2>
-          <p className="text-sm text-muted-foreground">
-            Track your children's current bus status and live location.
-          </p>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {loadingStudents ? (
-            <p className="col-span-full text-center text-muted-foreground">
-              Loading student data...
-            </p>
-          ) : studentViews.length === 0 ? (
-            <Card className="col-span-full text-center py-8 text-muted-foreground">
-              No students found for your account.
-            </Card>
-          ) : (
-            studentViews.map((v) => (
-              <Card key={v.student.id}>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <GraduationCap className="h-5 w-5 text-primary" />
-                    <CardTitle>{v.student.name}</CardTitle>
-                  </div>
-                  <CardDescription>
-                    {v.student.grade ?? v.student.className ?? "Grade N/A"}
-                  </CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  <div className="flex gap-2">
-                    <Bus className="h-4 w-4 text-primary" />
-                    <div>
-                      <div>{v.busName}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Plate: {v.plate}
                       </div>
+                      <Badge
+                        className={`text-white ${
+                          selectedStudentView.status === "CHECKED_IN"
+                            ? "bg-green-500"
+                            : selectedStudentView.status === "CHECKED_OUT"
+                            ? "bg-blue-500"
+                            : "bg-gray-500"
+                        }`}
+                      >
+                        {selectedStudentView.status === "CHECKED_IN"
+                          ? "Boarded"
+                          : selectedStudentView.status === "CHECKED_OUT"
+                          ? "Checked Out"
+                          : "Not Onboarded"}
+                      </Badge>
                     </div>
+
                   </div>
 
                   <div className="flex gap-2">
@@ -450,6 +431,7 @@ export default function ParentPortal() {
           </MapContainer>
         </div>
       </main>
+ main
     </div>
   );
 }
