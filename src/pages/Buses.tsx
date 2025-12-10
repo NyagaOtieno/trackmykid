@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Edit, Trash, Download } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,7 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { getBuses, deleteBus } from "@/lib/api";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -21,7 +21,6 @@ import AddBusForm from "@/pages/AddBusForm";
 export default function Buses() {
   const queryClient = useQueryClient();
 
-  // State
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "name", direction: "asc" });
   const [currentPage, setCurrentPage] = useState(1);
@@ -30,15 +29,16 @@ export default function Buses() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // Fetch Buses
-  const {
-    data: buses = [],
-    isLoading,
-    isError,
-  } = useQuery({
+  const { data: buses = [], isLoading, isError } = useQuery({
     queryKey: ["buses"],
     queryFn: getBuses,
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    staleTime: 1000 * 60 * 5,
   });
+
+  // Reset page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -49,25 +49,25 @@ export default function Buses() {
     },
   });
 
-  // Handle Sorting
+  // Sorting
   const sortedBuses = useMemo(() => {
     if (!buses) return [];
     return [...buses].sort((a, b) => {
-      const valA = a[sortConfig.key];
-      const valB = b[sortConfig.key];
+      const valA = (a[sortConfig.key] ?? "").toString().toLowerCase();
+      const valB = (b[sortConfig.key] ?? "").toString().toLowerCase();
       if (valA < valB) return sortConfig.direction === "asc" ? -1 : 1;
       if (valA > valB) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
   }, [buses, sortConfig]);
 
-  // Handle Filtering
+  // Filtering
   const filteredBuses = sortedBuses.filter((bus) => {
-    const search = searchTerm.toLowerCase();
+    const s = searchTerm.toLowerCase();
     return (
-      bus.name.toLowerCase().includes(search) ||
-      bus.plateNumber.toLowerCase().includes(search) ||
-      bus.route.toLowerCase().includes(search)
+      bus.name?.toLowerCase().includes(s) ||
+      bus.plateNumber?.toLowerCase().includes(s) ||
+      bus.route?.toLowerCase().includes(s)
     );
   });
 
@@ -78,7 +78,7 @@ export default function Buses() {
   );
   const totalPages = Math.ceil(filteredBuses.length / itemsPerPage);
 
-  // Export Handlers
+  // Export CSV
   const handleExportCSV = () => {
     const csv = Papa.unparse(buses);
     const blob = new Blob([csv], { type: "text/csv" });
@@ -90,6 +90,7 @@ export default function Buses() {
     window.URL.revokeObjectURL(url);
   };
 
+  // Export Excel
   const handleExportExcel = () => {
     const worksheet = XLSX.utils.json_to_sheet(buses);
     const workbook = XLSX.utils.book_new();
@@ -97,7 +98,7 @@ export default function Buses() {
     XLSX.writeFile(workbook, "buses.xlsx");
   };
 
-  // UI Handlers
+  // Sorting click handler
   const handleSort = (key: string) => {
     setSortConfig((prev) => ({
       key,
@@ -105,13 +106,14 @@ export default function Buses() {
     }));
   };
 
+  // Delete handler
   const handleDelete = (id: number) => {
     if (confirm("Are you sure you want to delete this bus?")) {
       deleteMutation.mutate(id);
     }
   };
 
-  const handleDialogOpen = (bus = null) => {
+  const openDialog = (bus = null) => {
     setSelectedBus(bus);
     setIsDialogOpen(true);
   };
@@ -131,7 +133,7 @@ export default function Buses() {
           <Button variant="outline" onClick={handleExportExcel}>
             <Download className="h-4 w-4 mr-2" /> Excel
           </Button>
-          <Button onClick={() => handleDialogOpen()}>
+          <Button onClick={() => openDialog()}>
             <Plus className="h-4 w-4 mr-2" /> Add Bus
           </Button>
         </div>
@@ -153,16 +155,28 @@ export default function Buses() {
         <Table>
           <TableHeader>
             <TableRow>
-              {["Name", "Plate Number", "Route", "Capacity", "Status"].map((col) => (
-                <TableHead key={col} onClick={() => handleSort(col.toLowerCase())}>
-                  {col}{" "}
-                  {sortConfig.key === col.toLowerCase() &&
-                    (sortConfig.direction === "asc" ? "▲" : "▼")}
-                </TableHead>
-              ))}
+              <TableHead onClick={() => handleSort("name")}>
+                Name {sortConfig.key === "name" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+              </TableHead>
+
+              <TableHead onClick={() => handleSort("plateNumber")}>
+                Plate Number {sortConfig.key === "plateNumber" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+              </TableHead>
+
+              <TableHead onClick={() => handleSort("route")}>
+                Route {sortConfig.key === "route" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+              </TableHead>
+
+              <TableHead onClick={() => handleSort("capacity")}>
+                Capacity {sortConfig.key === "capacity" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+              </TableHead>
+
+              <TableHead>Status</TableHead>
+
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
+
           <TableBody>
             {isLoading ? (
               <TableRow>
@@ -184,11 +198,12 @@ export default function Buses() {
               </TableRow>
             ) : (
               paginatedBuses.map((bus) => (
-                <TableRow key={bus.id}>
-                  <TableCell className="font-medium">{bus.name}</TableCell>
-                  <TableCell>{bus.plateNumber}</TableCell>
-                  <TableCell>{bus.route}</TableCell>
-                  <TableCell>{bus.capacity}</TableCell>
+                <TableRow key={bus.id || bus.plateNumber || Math.random()}>
+                  <TableCell className="font-medium">{bus.name ?? "-"}</TableCell>
+                  <TableCell>{bus.plateNumber ?? "-"}</TableCell>
+                  <TableCell>{bus.route ?? "-"}</TableCell>
+                  <TableCell>{bus.capacity ?? "-"}</TableCell>
+
                   <TableCell>
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -198,8 +213,9 @@ export default function Buses() {
                       {bus.isMoving ? "Moving" : "Stopped"}
                     </span>
                   </TableCell>
+
                   <TableCell className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => handleDialogOpen(bus)}>
+                    <Button size="sm" variant="outline" onClick={() => openDialog(bus)}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="destructive" onClick={() => handleDelete(bus.id)}>
@@ -234,9 +250,8 @@ export default function Buses() {
         </div>
       </div>
 
-      {/* Dialog for Add/Edit */}
+      {/* Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogTrigger asChild></DialogTrigger>
         <DialogContent className="max-w-lg">
           <AddBusForm
             bus={selectedBus}
