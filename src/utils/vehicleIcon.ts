@@ -8,7 +8,7 @@ import L from "leaflet";
  * @param isSelected - Whether the vehicle is currently selected (affects size)
  * @returns Leaflet Icon instance
  */
-export function createBusIcon(vehicle: any, isSelected: boolean = false): L.Icon {
+export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivIcon {
   const movementState = vehicle.movementState?.toLowerCase() || "unknown";
   // Check for fallback: either explicit __fallback flag or missing coordinates
   const isFallback = vehicle.__fallback === true || !vehicle.lat || !vehicle.lng;

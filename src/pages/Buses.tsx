@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Edit, Trash, Download } from "lucide-react";
+import { Plus, Search, Edit, Trash, Download, BusFront } from "lucide-react";
 import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBuses, deleteBus } from "@/lib/api";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
@@ -28,6 +29,7 @@ export default function Buses() {
   const itemsPerPage = 10;
   const [selectedBus, setSelectedBus] = useState<any | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
   // Fetch Buses
   const {
@@ -105,9 +107,11 @@ export default function Buses() {
     }));
   };
 
-  const handleDelete = (id: number) => {
-    if (confirm("Are you sure you want to delete this bus?")) {
-      deleteMutation.mutate(id);
+  const handleDeleteConfirm = () => {
+    if (deleteTarget) {
+      deleteMutation.mutate(deleteTarget.id, {
+        onSettled: () => setDeleteTarget(null),
+      });
     }
   };
 
@@ -119,26 +123,31 @@ export default function Buses() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Buses</h2>
-          <p className="text-muted-foreground mt-1">Manage fleet and bus assignments</p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 rounded-full bg-primary/10 text-primary grid place-items-center">
+            <BusFront className="h-5 w-5" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-3xl font-bold leading-tight">Buses</h2>
+            <p className="text-muted-foreground text-sm">Manage fleet and bus assignments.</p>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleExportCSV}>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={handleExportCSV} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4 mr-2" /> CSV
           </Button>
-          <Button variant="outline" onClick={handleExportExcel}>
+          <Button variant="outline" onClick={handleExportExcel} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4 mr-2" /> Excel
           </Button>
-          <Button onClick={() => handleDialogOpen()}>
+          <Button onClick={() => handleDialogOpen()} className="flex-1 sm:flex-none">
             <Plus className="h-4 w-4 mr-2" /> Add Bus
           </Button>
         </div>
       </div>
 
       {/* Search */}
-      <div className="relative max-w-md">
+      <div className="relative w-full max-w-xl">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Search buses..."
@@ -148,8 +157,64 @@ export default function Buses() {
         />
       </div>
 
-      {/* Table */}
-      <div className="bg-card rounded-lg border">
+      {/* Mobile Cards */}
+      <div className="grid grid-cols-1 gap-4 md:hidden">
+        {isLoading ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground">Loading...</CardContent></Card>
+        ) : isError ? (
+          <Card><CardContent className="py-8 text-center text-red-500">Failed to load buses</CardContent></Card>
+        ) : paginatedBuses.length === 0 ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground">No buses found</CardContent></Card>
+        ) : (
+          paginatedBuses.map((bus) => (
+            <Card key={bus.id} className="border shadow-sm">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <CardTitle className="text-lg">{bus.name}</CardTitle>
+                    <p className="text-sm text-muted-foreground">{bus.plateNumber}</p>
+                  </div>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${
+                      bus.isMoving ? "bg-red-500/10 text-red-600" : "bg-green-500/10 text-green-600"
+                    }`}
+                  >
+                    {bus.isMoving ? "Moving" : "Stopped"}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Route</p>
+                    <p className="font-medium">{bus.route || "-"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Capacity</p>
+                    <p className="font-medium">{bus.capacity}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1" onClick={() => handleDialogOpen(bus)}>
+                    <Edit className="h-4 w-4 mr-1.5" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={() => setDeleteTarget({ id: bus.id, name: bus.name })}
+                  >
+                    <Trash className="h-4 w-4 mr-1.5" /> Delete
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Table */}
+      <div className="hidden md:block bg-card rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -202,7 +267,7 @@ export default function Buses() {
                     <Button size="sm" variant="outline" onClick={() => handleDialogOpen(bus)}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={() => handleDelete(bus.id)}>
+                    <Button size="sm" variant="destructive" onClick={() => setDeleteTarget({ id: bus.id, name: bus.name })}>
                       <Trash className="h-4 w-4" />
                     </Button>
                   </TableCell>
@@ -214,21 +279,21 @@ export default function Buses() {
       </div>
 
       {/* Pagination */}
-      <div className="flex justify-between items-center mt-4">
-        <span>
-          Page {currentPage} of {totalPages}
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between mt-4">
+        <span className="text-sm text-muted-foreground">
+          Page {currentPage} of {totalPages || 1}
         </span>
-        <div className="flex gap-2">
-          <Button disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>
             First
           </Button>
-          <Button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
+          <Button size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
             Prev
           </Button>
-          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>
+          <Button size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>
             Next
           </Button>
-          <Button disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>
+          <Button size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>
             Last
           </Button>
         </div>
@@ -237,14 +302,37 @@ export default function Buses() {
       {/* Dialog for Add/Edit */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogTrigger asChild></DialogTrigger>
-        <DialogContent className="max-w-lg">
-          <AddBusForm
-            bus={selectedBus}
-            onSuccess={() => {
-              queryClient.invalidateQueries(["buses"]);
-              setIsDialogOpen(false);
-            }}
-          />
+        <DialogContent className="w-[92vw] sm:w-[640px] md:w-[760px] max-w-[760px] p-0 border-none bg-transparent shadow-none">
+          <div className="bg-background border rounded-xl sm:rounded-2xl shadow-2xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
+            <AddBusForm
+              bus={selectedBus}
+              embedded
+              onSuccess={() => {
+                queryClient.invalidateQueries(["buses"]);
+                setIsDialogOpen(false);
+              }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete bus</DialogTitle>
+            <DialogDescription>
+              {deleteTarget ? `Are you sure you want to delete "${deleteTarget.name}"? This action cannot be undone.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleteMutation.isLoading}>
+              {deleteMutation.isLoading ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

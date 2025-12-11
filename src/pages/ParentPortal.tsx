@@ -15,7 +15,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-// @ts-expect-error - useMap exists in react-leaflet v4 but @types/react-leaflet is outdated
 import { useMap } from "react-leaflet";
 import {
   Card,

@@ -81,7 +81,13 @@ const addBus = async (bus: any) => {
   return res.data;
 };
 
-export default function AddBusForm() {
+type AddBusFormProps = {
+  onSuccess?: () => void;
+  bus?: any; // TODO: wire up edit mode
+  embedded?: boolean;
+};
+
+export default function AddBusForm({ onSuccess, embedded = false }: AddBusFormProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const token = localStorage.getItem("token");
@@ -150,7 +156,11 @@ export default function AddBusForm() {
     onSuccess: () => {
       toast.success("Bus added successfully!");
       queryClient.invalidateQueries(["buses"]);
-      navigate("/buses");
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        navigate("/buses");
+      }
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to add bus");
@@ -195,31 +205,34 @@ export default function AddBusForm() {
 
   if (driversLoading || assistantsLoading || schoolsLoading) {
     return (
-      <div className="flex justify-center mt-20">
+      <div className="flex justify-center py-10">
         <Loader2 className="animate-spin" />
       </div>
     );
   }
 
+  const containerClasses = embedded ? "p-1 sm:p-2" : "min-h-screen bg-muted/30 p-6";
+  const cardClasses = embedded ? "shadow-none border-none" : "max-w-xl mx-auto";
+
   return (
-    <div className="min-h-screen bg-muted/30 p-6">
-      <Card className="max-w-xl mx-auto">
-        <CardHeader>
+    <div className={containerClasses}>
+      <Card className={`${cardClasses} w-full`}>
+        <CardHeader className="pb-2">
           <CardTitle>Add New Bus</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div className="space-y-2">
               <Label>Bus Name</Label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="e.g., Westlands Shuttle"
               />
-              {errors.name && <p className="text-red-600">{errors.name}</p>}
+              {errors.name && <p className="text-red-600 text-sm">{errors.name}</p>}
             </div>
 
-            <div>
+            <div className="space-y-2">
               <Label>Plate Number</Label>
               <Input
                 value={form.plateNumber}
@@ -229,11 +242,11 @@ export default function AddBusForm() {
                 placeholder="e.g., KBB456Y"
               />
               {errors.plateNumber && (
-                <p className="text-red-600">{errors.plateNumber}</p>
+                <p className="text-red-600 text-sm">{errors.plateNumber}</p>
               )}
             </div>
 
-            <div>
+            <div className="space-y-2">
               <Label>Capacity</Label>
               <Input
                 type="number"
@@ -242,11 +255,11 @@ export default function AddBusForm() {
                 placeholder="e.g., 35"
               />
               {errors.capacity && (
-                <p className="text-red-600">{errors.capacity}</p>
+                <p className="text-red-600 text-sm">{errors.capacity}</p>
               )}
             </div>
 
-            <div>
+            <div className="space-y-2">
               <Label>Route</Label>
               <Input
                 value={form.route}
@@ -256,7 +269,7 @@ export default function AddBusForm() {
             </div>
 
             {/* Driver */}
-            <div>
+            <div className="space-y-2">
               <Label>Driver</Label>
               <Select
                 value={form.driverId}
@@ -264,7 +277,7 @@ export default function AddBusForm() {
               >
                 <SelectTrigger>
                   <SelectValue>
-                    {drivers.find((d) => d.id.toString() === form.driverId)?.name ||
+                    {drivers.find((d: any) => d.id.toString() === form.driverId)?.name ||
                       "Select Driver"}
                   </SelectValue>
                 </SelectTrigger>
@@ -276,15 +289,17 @@ export default function AddBusForm() {
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem disabled>No available drivers</SelectItem>
+                    <SelectItem disabled value="none">
+                      No available drivers
+                    </SelectItem>
                   )}
                 </SelectContent>
               </Select>
-              {errors.driverId && <p className="text-red-600">{errors.driverId}</p>}
+              {errors.driverId && <p className="text-red-600 text-sm">{errors.driverId}</p>}
             </div>
 
             {/* Assistant */}
-            <div>
+            <div className="space-y-2">
               <Label>Assistant</Label>
               <Select
                 value={form.assistantId}
@@ -292,7 +307,7 @@ export default function AddBusForm() {
               >
                 <SelectTrigger>
                   <SelectValue>
-                    {assistants.find((a) => a.id.toString() === form.assistantId)?.name ||
+                    {assistants.find((a: any) => a.id.toString() === form.assistantId)?.name ||
                       "Select Assistant"}
                   </SelectValue>
                 </SelectTrigger>
@@ -304,17 +319,19 @@ export default function AddBusForm() {
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem disabled>No available assistants</SelectItem>
+                    <SelectItem disabled value="none">
+                      No available assistants
+                    </SelectItem>
                   )}
                 </SelectContent>
               </Select>
               {errors.assistantId && (
-                <p className="text-red-600">{errors.assistantId}</p>
+                <p className="text-red-600 text-sm">{errors.assistantId}</p>
               )}
             </div>
 
             {/* School */}
-            <div>
+            <div className="space-y-2">
               <Label>School</Label>
               <Select
                 onValueChange={(val) => setForm({ ...form, schoolId: val })}
@@ -334,15 +351,15 @@ export default function AddBusForm() {
                   ))}
                 </SelectContent>
               </Select>
-              {errors.schoolId && <p className="text-red-600">{errors.schoolId}</p>}
+              {errors.schoolId && <p className="text-red-600 text-sm">{errors.schoolId}</p>}
             </div>
           </div>
 
-          <div className="flex gap-4 mt-4">
-            <Button onClick={handleSubmit} disabled={mutation.isLoading}>
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:justify-end pt-2">
+            <Button onClick={handleSubmit} disabled={mutation.isLoading} className="sm:min-w-[120px]">
               {mutation.isLoading ? "Saving..." : "Save Bus"}
             </Button>
-            <Button variant="secondary" onClick={resetForm}>
+            <Button variant="secondary" onClick={resetForm} className="sm:min-w-[120px]">
               Reset
             </Button>
           </div>

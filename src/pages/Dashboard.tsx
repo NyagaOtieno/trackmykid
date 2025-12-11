@@ -431,37 +431,37 @@ export default function Dashboard() {
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <Card className="shadow-md hover:shadow-lg transition-all">
-            <CardHeader className="flex justify-between pb-2">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 w-full">
+          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+            <CardHeader className="flex justify-between pb-1">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Students</CardTitle>
               <Users className="w-5 h-5 text-blue-600" />
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{students.length}</div>
-              <p className="text-xs text-muted-foreground">Enrolled across all buses</p>
+            <CardContent className="pt-0 space-y-2">
+              <div className="text-3xl font-bold leading-tight">{students.length}</div>
+              <p className="text-xs text-muted-foreground leading-snug">Enrolled across all buses</p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all">
-            <CardHeader className="flex justify-between pb-2">
+          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+            <CardHeader className="flex justify-between pb-1">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Buses</CardTitle>
               <Bus className="w-5 h-5 text-green-600" />
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{buses.length}</div>
-              <p className="text-xs text-muted-foreground">Active in your school fleet</p>
+            <CardContent className="pt-0 space-y-2">
+              <div className="text-3xl font-bold leading-tight">{buses.length}</div>
+              <p className="text-xs text-muted-foreground leading-snug">Active in your school fleet</p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all">
-            <CardHeader className="flex justify-between pb-2">
+          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+            <CardHeader className="flex justify-between pb-1">
               <CardTitle className="text-sm font-medium text-muted-foreground">Today's Trips</CardTitle>
               <ClipboardList className="w-5 h-5 text-orange-600" />
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{todaysManifests.length}</div>
-              <p className="text-xs text-muted-foreground">Trip manifests recorded today</p>
+            <CardContent className="pt-0 space-y-2">
+              <div className="text-3xl font-bold leading-tight">{todaysManifests.length}</div>
+              <p className="text-xs text-muted-foreground leading-snug">Trip manifests recorded today</p>
             </CardContent>
           </Card>
         </div>

@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Bus, User, UserCog, MapPin, Gauge, Navigation, Clock, AlertCircle } from "lucide-react";
+import { Bus, Car, User, UserCog, MapPin, Gauge, Navigation, Clock, AlertCircle, Search } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import axios from "axios";
@@ -372,6 +372,13 @@ export default function Tracking() {
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
+  const totalVehicles = buses.length;
+  const liveVehicles = buses.filter((v: any) => !v.__fallback).length;
+  const standingVehicles = buses.filter(
+    (v: any) => v.movementState?.toLowerCase() === "standing",
+  ).length;
+  const selectedLabel = selectedVehicle?.plateNumber ?? "None selected";
+
   const filteredLocations = useMemo(() => {
     return buses.filter((v: any) =>
       v.plateNumber?.toLowerCase().includes(search.toLowerCase())
@@ -387,112 +394,200 @@ export default function Tracking() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
-          <p className="text-muted-foreground mt-1">Real-time tracking for all vehicles</p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-11 w-11 rounded-full bg-primary/10 text-primary grid place-items-center">
+            <Car className="h-5 w-5" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl sm:text-3xl font-bold">Live Vehicle Tracking</h1>
+            <p className="text-sm text-muted-foreground">
+              Real-time visibility across your fleet with quick filters and details.
+            </p>
+          </div>
         </div>
-        <div className="text-sm text-muted-foreground flex items-center gap-2">
-          <Clock className="h-4 w-4" />
-          Last update: {new Date().toLocaleTimeString()}
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 rounded-full border px-3 py-1.5 bg-card">
+            <Clock className="h-4 w-4" />
+            <span className="font-medium">Last update</span>
+            <span className="text-foreground">{new Date().toLocaleTimeString()}</span>
+          </div>
+          <Button variant="outline" onClick={() => refetch()}>
+            Refresh
+          </Button>
         </div>
       </div>
 
-      {/* Search */}
-      <div className="flex gap-2 items-center">
-        <Input
-          placeholder="Search plate number..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <Button onClick={() => refetch()}>Refresh</Button>
+      {/* Quick stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <Card className="border-muted shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Fleet size</p>
+              <p className="text-2xl font-bold">{totalVehicles}</p>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-primary/10 text-primary grid place-items-center">
+              <Car className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-muted shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Live GPS</p>
+              <p className="text-2xl font-bold">{liveVehicles}</p>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-emerald-50 text-emerald-600 grid place-items-center dark:bg-emerald-950/40 dark:text-emerald-300">
+              <Navigation className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-muted shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Standing</p>
+              <p className="text-2xl font-bold">{standingVehicles}</p>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 grid place-items-center dark:bg-blue-950/40 dark:text-blue-300">
+              <Gauge className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-muted shadow-sm">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Selected</p>
+              <p className="text-sm font-semibold truncate max-w-[180px]">{selectedLabel}</p>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-muted text-foreground grid place-items-center">
+              <Bus className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Map and Details Side by Side */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Map - Takes 2 columns */}
-        <div className="lg:col-span-2 bg-card rounded-lg border overflow-hidden h-[600px]">
-          <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }}>
-            <TileLayer
-              attribution='&copy; OpenStreetMap contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      {/* Filters */}
+      <Card className="border-muted shadow-sm">
+        <CardContent className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="w-full sm:max-w-md relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search by plate number..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => refetch()}>
+              Refresh data
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-            {filteredLocations.map((bus) => {
-              const isSelected = selectedVehicle?.busId === bus.busId;
-              return (
-                <PersistentMarker
-                  key={bus.busId}
-                  bus={bus}
-                  isSelected={isSelected}
-                  onSelect={() => setSelectedVehicle(bus)}
+      {/* Map and Details */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr] gap-6">
+        <Card className="overflow-hidden border-muted shadow-sm">
+          <CardHeader className="flex flex-col gap-1">
+            <CardTitle className="text-lg">Live map</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Tap a vehicle to view quick details and center the map.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="h-[420px] sm:h-[520px] xl:h-[620px]">
+              <MapContainer center={center} zoom={12} className="h-full w-full" zoomControl>
+                <TileLayer
+                  attribution='&copy; OpenStreetMap contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-              );
-            })}
 
-            <FlyToLocation selectedVehicle={selectedVehicle} />
-          </MapContainer>
-        </div>
+                {filteredLocations.map((bus: any) => {
+                  const isSelected = selectedVehicle?.busId === bus.busId;
+                  return (
+                    <PersistentMarker
+                      key={bus.busId}
+                      bus={bus}
+                      isSelected={isSelected}
+                      onSelect={() => setSelectedVehicle(bus)}
+                    />
+                  );
+                })}
 
-        {/* Vehicle Details Card - Takes 1 column */}
-        <div className="lg:col-span-1">
+                <FlyToLocation selectedVehicle={selectedVehicle} />
+              </MapContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="space-y-4">
           {selectedVehicle ? (
-            <div className="sticky top-6">
+            <div className="sticky top-4">
               <VehicleDetailsCard vehicle={selectedVehicle} />
             </div>
           ) : (
-            <Card className="h-full flex items-center justify-center">
-              <CardContent className="text-center text-muted-foreground">
-                <Bus className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Select a vehicle on the map to view details</p>
+            <Card className="h-full min-h-[240px] flex items-center justify-center border-muted shadow-sm">
+              <CardContent className="text-center text-muted-foreground space-y-3">
+                <Bus className="h-10 w-10 mx-auto opacity-70" />
+                <p className="font-medium">Select a vehicle to view trip details.</p>
               </CardContent>
             </Card>
           )}
         </div>
       </div>
 
-      {/* Vehicle List - Real-time data from API */}
-      <div>
-        <h3 className="text-xl font-semibold mb-4">All Vehicles ({filteredLocations.length})</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredLocations.map((bus) => (
+      {/* Vehicle List */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="text-xl font-semibold">All Vehicles ({filteredLocations.length})</h3>
+          <p className="text-sm text-muted-foreground">Tap to focus and see driver details.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filteredLocations.map((bus: any) => (
             <Card
               key={bus.busId}
-              className={`cursor-pointer hover:shadow-lg transition-all ${
-                selectedVehicle?.busId === bus.busId ? "border-primary border-2 shadow-lg" : ""
+              className={`cursor-pointer transition-all border-muted shadow-sm hover:-translate-y-0.5 hover:shadow-md ${
+                selectedVehicle?.busId === bus.busId ? "border-primary ring-1 ring-primary/20" : ""
               }`}
               onClick={() => setSelectedVehicle(bus)}
             >
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
                       <Bus className="h-5 w-5 text-primary" />
                       <h3 className="font-semibold text-lg">{bus.plateNumber}</h3>
                     </div>
+                    {bus.bus?.route && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MapPin className="h-4 w-4" />
+                        <p className="truncate max-w-[220px]">{bus.bus.route}</p>
+                      </div>
+                    )}
                     {bus.driver?.name && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <User className="h-4 w-4" />
                         <p>{bus.driver.name}</p>
                       </div>
                     )}
-                    {bus.bus?.route && (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                        <MapPin className="h-4 w-4" />
-                        <p>{bus.bus.route}</p>
-                      </div>
-                    )}
                   </div>
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex flex-col items-end gap-1">
                     <div
-                      className={`h-4 w-4 rounded-full ${
+                      className={`h-5 w-5 rounded-full ${
                         bus.__fallback
-                          ? "bg-gray-500"
+                          ? "bg-gray-400"
                           : bus.movementState?.toLowerCase() === "standing"
                           ? "bg-blue-500"
                           : "bg-green-500"
                       }`}
+                      title={
+                        bus.__fallback
+                          ? "No GPS"
+                          : bus.movementState?.toLowerCase() === "standing"
+                          ? "Standing"
+                          : "Moving"
+                      }
                     />
                     {bus.speed !== undefined && (
                       <div className="text-xs text-muted-foreground">

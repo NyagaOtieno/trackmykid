@@ -1,0 +1,26 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import Students from "./pages/Students";
+import Buses from "./pages/Buses";
+import Tracking from "./pages/Tracking";
+import Manifests from "./pages/Manifests";
+import Assistants from "./pages/Assistants";
+import Drivers from "./pages/Drivers";
+import Parents from "./pages/Parents";
+import ParentPortal from "./pages/ParentPortal";
+import DriverPortal from "./pages/DriverPortal";
+import AssistantPortal from "./pages/AssistantPortal";
+import Settings from "./pages/Settings";
+import NotFound from "./pages/NotFound";
+import AddBusPage from "./pages/AddBusForm"; // ✅ Import new Add Bus page
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { DashboardLayout } from "./components/DashboardLayout";
+const queryClient = new QueryClient();
+const App = () => (_jsx(QueryClientProvider, { client: queryClient, children: _jsxs(TooltipProvider, { children: [_jsx(Toaster, {}), _jsx(Sonner, {}), _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: _jsx(Login, {}) }), _jsxs(Route, { element: _jsx(ProtectedRoute, {}), children: [_jsx(Route, { path: "/parent-portal", element: _jsx(ParentPortal, {}) }), _jsx(Route, { path: "/driver-portal", element: _jsx(DriverPortal, {}) }), _jsx(Route, { path: "/assistant-portal", element: _jsx(AssistantPortal, {}) }), _jsxs(Route, { element: _jsx(DashboardLayout, {}), children: [_jsx(Route, { path: "/dashboard", element: _jsx(Dashboard, {}) }), _jsx(Route, { path: "/students", element: _jsx(Students, {}) }), _jsx(Route, { path: "/buses", element: _jsx(Buses, {}) }), _jsx(Route, { path: "/buses/add", element: _jsx(AddBusPage, {}) }), " ", _jsx(Route, { path: "/tracking", element: _jsx(Tracking, {}) }), _jsx(Route, { path: "/manifests", element: _jsx(Manifests, {}) }), _jsx(Route, { path: "/assistants", element: _jsx(Assistants, {}) }), _jsx(Route, { path: "/drivers", element: _jsx(Drivers, {}) }), _jsx(Route, { path: "/parents", element: _jsx(Parents, {}) }), _jsx(Route, { path: "/settings", element: _jsx(Settings, {}) })] })] }), _jsx(Route, { path: "*", element: _jsx(NotFound, {}) })] }) })] }) }));
+export default App;

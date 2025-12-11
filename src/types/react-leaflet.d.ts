@@ -1,3 +1,44 @@
+declare module "react-leaflet" {
+  import { ComponentType, ReactNode } from "react";
+
+  export interface MapContainerProps {
+    center?: any;
+    zoom?: number;
+    className?: string;
+    style?: any;
+    zoomControl?: boolean;
+    scrollWheelZoom?: boolean;
+    children?: ReactNode;
+  }
+
+  export interface MarkerProps {
+    position: any;
+    icon?: any;
+    children?: ReactNode;
+    eventHandlers?: Record<string, (...args: any[]) => void>;
+    zIndexOffset?: number;
+    ref?: any;
+  }
+
+  export interface PopupProps {
+    children?: ReactNode;
+    maxWidth?: number;
+    minWidth?: number;
+    autoPan?: boolean;
+    autoPanPadding?: any;
+    closeButton?: boolean;
+    className?: string;
+    offset?: any;
+  }
+
+  export const MapContainer: ComponentType<MapContainerProps>;
+  export const TileLayer: ComponentType<any>;
+  export const Marker: ComponentType<MarkerProps>;
+  export const Popup: ComponentType<PopupProps>;
+  export const Polyline: ComponentType<any>;
+  export function useMap(): any;
+  export function useMapEvents(handlers: any): any;
+}
 declare module 'react-leaflet' {
   import { LatLngExpression, Icon as LeafletIcon } from 'leaflet';
   

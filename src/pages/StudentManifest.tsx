@@ -14,7 +14,8 @@ interface Student {
 interface Manifest {
   id: number;
   studentId: number;
-  status: "CHECKED_IN" | "CHECKED_OUT";
+  status: "CHECKED_IN" | "CHECKED_OUT" | "NOT_CHECKED";
+  date?: string;
   student: Student;
 }
 
@@ -29,11 +30,15 @@ const fetchManifests = async () => {
 };
 
 export default function StudentManifest() {
-  const { data: students = [], isLoading: studentsLoading } = useQuery(["students"], fetchStudents, {
+  const { data: students = [], isLoading: studentsLoading } = useQuery<Student[]>({
+    queryKey: ["students"],
+    queryFn: fetchStudents,
     refetchInterval: 10000, // refresh every 10 seconds
   });
 
-  const { data: manifests = [], isLoading: manifestsLoading } = useQuery(["manifests"], fetchManifests, {
+  const { data: manifests = [], isLoading: manifestsLoading } = useQuery<Manifest[]>({
+    queryKey: ["manifests"],
+    queryFn: fetchManifests,
     refetchInterval: 10000,
   });
 
@@ -47,7 +52,7 @@ export default function StudentManifest() {
     <div className="space-y-4">
       <div className="flex gap-4">
         <Badge>Total Students: {students.length}</Badge>
-        <Badge variant="success">Checked In: {checkedInIds.length}</Badge>
+        <Badge className="bg-green-600 text-white hover:bg-green-700">Checked In: {checkedInIds.length}</Badge>
         <Badge variant="destructive">Checked Out: {checkedOutIds.length}</Badge>
       </div>
 
@@ -63,7 +68,7 @@ export default function StudentManifest() {
           {students.map(student => {
             const latestManifest = manifests
               .filter(m => m.studentId === student.id)
-              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+              .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())[0];
 
             const status = latestManifest?.status || "NOT_CHECKED";
 
@@ -72,7 +77,7 @@ export default function StudentManifest() {
                 <TableCell>{student.name}</TableCell>
                 <TableCell>{student.grade}</TableCell>
                 <TableCell>
-                  {status === "CHECKED_IN" && <Badge variant="success">Checked In</Badge>}
+                  {status === "CHECKED_IN" && <Badge className="bg-green-600 text-white hover:bg-green-700">Checked In</Badge>}
                   {status === "CHECKED_OUT" && <Badge variant="destructive">Checked Out</Badge>}
                   {status === "NOT_CHECKED" && <Badge>Not Checked</Badge>}
                 </TableCell>

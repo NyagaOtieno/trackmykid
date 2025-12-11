@@ -14,7 +14,7 @@ import toast from "react-hot-toast";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import L from "leaflet";
+import L, { LeafletMouseEvent } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 // Leaflet marker icon
@@ -27,7 +27,7 @@ const markerIcon = L.icon({
 // Map click with reverse geocoding
 function LocationPicker({ onPick }: { onPick: (coords: { lat: number; lng: number; address?: string }) => void }) {
   useMapEvents({
-    async click(e) {
+    async click(e: LeafletMouseEvent) {
       const { lat, lng } = e.latlng;
       try {
         const res = await fetch(
