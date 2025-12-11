@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import axios from "axios";
 import AddParentForm from "./AddParentForm";
 import EditParentForm from "./EditParentForm";
@@ -46,6 +47,7 @@ export default function ParentsUI() {
   const [editingParent, setEditingParent] = useState<Parent | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [deleteTarget, setDeleteTarget] = useState<Parent | null>(null);
 
   const itemsPerPage = 15;
   const SCHOOL_ID = 14;
@@ -71,56 +73,33 @@ export default function ParentsUI() {
     fetchData();
   }, []);
 
-  const handleDelete = async (parent: Parent) => {
-    const userId = parent.user?.id;
+  const handleDelete = async () => {
+    const userId = deleteTarget?.user?.id;
     if (!userId) return;
-    if (!confirm(`Delete ${parent.user?.name || "this parent"}?`)) return;
 
     try {
       await axios.delete(`https://schooltransport-production.up.railway.app/api/users/${userId}`);
-      alert("Parent deleted successfully");
       fetchData();
+      setDeleteTarget(null);
     } catch (err) {
       console.error(err);
       alert("Failed to delete parent");
     }
   };
 
-  const handleAddParent = async (data: Partial<User>) => {
-    try {
-      await axios.post("https://schooltransport-production.up.railway.app/api/users", {
-        ...data,
-        role: "PARENT",
-        schoolId: SCHOOL_ID,
-      });
-      alert("Parent added successfully");
-      setAddingParent(false);
-      fetchData();
-    } catch (err) {
-      console.error(err);
-      alert("Failed to add parent");
-    }
+  const handleAddParent = async () => {
+    setAddingParent(false);
+    fetchData();
   };
 
-  const handleUpdateParent = async (parentId: number, data: Partial<User>) => {
-    try {
-      await axios.put(`https://schooltransport-production.up.railway.app/api/users/${parentId}`, {
-        ...data,
-        role: "PARENT",
-        schoolId: SCHOOL_ID,
-      });
-      alert("Parent updated successfully");
-      setEditingParent(null);
-      fetchData();
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update parent");
-    }
+  const handleUpdateParent = async () => {
+    setEditingParent(null);
+    fetchData();
   };
 
   const filteredParents = parents.filter((p) => {
     const term = searchTerm.toLowerCase();
-    const user = p.user ?? {};
+    const user: Partial<User> = p.user ?? {};
     return (
       user.name?.toLowerCase().includes(term) ||
       user.email?.toLowerCase().includes(term) ||
@@ -141,21 +120,23 @@ export default function ParentsUI() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Parents</h2>
-          <p className="text-muted-foreground mt-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-3xl font-bold leading-tight">Parents</h2>
+          <p className="text-muted-foreground text-sm">
             Manage parent contacts and linked students
           </p>
         </div>
-        <Button onClick={() => setAddingParent(true)}>
-          <Plus className="h-4 w-4 mr-2" /> Add Parent
-        </Button>
+        <div className="flex w-full sm:w-auto sm:justify-end">
+          <Button className="w-full sm:w-auto" onClick={() => setAddingParent(true)}>
+            <Plus className="h-4 w-4 mr-2" /> Add Parent
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
       <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search parents..."
@@ -167,47 +148,50 @@ export default function ParentsUI() {
       </div>
 
       {/* Table */}
-      <div className="bg-card rounded-lg border overflow-hidden">
-        <Table>
-          <TableHeader>
+      <div className="bg-card rounded-lg border shadow-sm overflow-x-auto max-h-[70vh]">
+        <Table className="min-w-[840px] text-sm">
+          <TableHeader className="sticky top-0 bg-card/95 backdrop-blur">
             <TableRow>
-              <TableHead>#</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Linked Students</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">#</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Name</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Phone</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Email</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Linked Students</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={6} className="text-center py-6">
                   Loading parents...
                 </TableCell>
               </TableRow>
             ) : paginatedParents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={6} className="text-center py-6">
                   No parents found
                 </TableCell>
               </TableRow>
             ) : (
               paginatedParents.map((parent, idx) => {
-                const user = parent.user ?? {};
+                const user: Partial<User> = parent.user ?? {};
                 const linkedStudents = studentsByParent[parent.id] ?? [];
                 return (
-                  <TableRow key={parent.id}>
+                  <TableRow
+                    key={parent.id}
+                    className="hover:bg-muted/40 transition-colors align-middle [&>td]:py-1.5"
+                  >
                     <TableCell>{startIndex + idx + 1}</TableCell>
                     <TableCell className="font-medium">{user.name ?? "N/A"}</TableCell>
                     <TableCell>{user.phone ?? "N/A"}</TableCell>
                     <TableCell>{user.email ?? "N/A"}</TableCell>
                     <TableCell>
                       {linkedStudents.length > 0 ? (
-                        <ul className="list-disc list-inside space-y-1">
+                        <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                           {linkedStudents.map((s) => (
-                            <li key={s.id}>
-                              {s.name} ({s.bus?.name ?? "No Bus"} - {s.bus?.plateNumber ?? "N/A"} -{" "}
+                            <li key={s.id} className="leading-snug text-foreground">
+                              {s.name} ({s.bus?.name ?? "No Bus"} · {s.bus?.plateNumber ?? "N/A"} ·{" "}
                               {s.bus?.route ?? "N/A"})
                             </li>
                           ))}
@@ -216,7 +200,7 @@ export default function ParentsUI() {
                         <span className="text-muted-foreground">No students</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right space-x-2">
+                    <TableCell className="text-right space-x-2 whitespace-nowrap">
                       <Button
                         variant="secondary"
                         size="sm"
@@ -227,7 +211,7 @@ export default function ParentsUI() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleDelete(parent)}
+                        onClick={() => setDeleteTarget(parent)}
                       >
                         <Trash className="h-4 w-4 mr-1" /> Delete
                       </Button>
@@ -286,12 +270,31 @@ export default function ParentsUI() {
             <h2 className="text-lg font-bold mb-4">Edit Parent</h2>
             <EditParentForm
               parent={editingParent.user ? { ...editingParent.user, id: editingParent.id } : editingParent}
-              onUpdated={(data) => handleUpdateParent(editingParent.id, data)}
+              onUpdated={handleUpdateParent}
               onCancel={() => setEditingParent(null)}
             />
           </div>
         </div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete parent</DialogTitle>
+            <DialogDescription>
+              {deleteTarget ? `Are you sure you want to delete "${deleteTarget.user?.name ?? "this parent"}"? This cannot be undone.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

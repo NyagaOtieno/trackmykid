@@ -14,6 +14,7 @@ import {
 import { getAssistants, getBuses, updateUser, deleteUser } from '@/lib/api';
 import EditAssistantForm from './EditAssistantForm';
 import AddAssistantForm from './AddAssistantForm';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 // Types
 interface Assistant {
@@ -34,6 +35,7 @@ export default function Assistants() {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
   const [addingAssistant, setAddingAssistant] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Assistant | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch assistants
@@ -77,12 +79,12 @@ export default function Assistants() {
   };
 
   // Delete assistant
-  const handleDelete = async (assistant: Assistant) => {
-    if (!confirm(`Are you sure you want to delete ${assistant.name}?`)) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteUser(assistant.id);
+      await deleteUser(deleteTarget.id);
       queryClient.invalidateQueries(['assistants']);
-      alert(`${assistant.name} deleted successfully`);
+      setDeleteTarget(null);
     } catch (error) {
       console.error(error);
       alert('Failed to delete assistant');
@@ -111,22 +113,24 @@ export default function Assistants() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold">Bus Assistants</h2>
-          <p className="text-muted-foreground mt-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-3xl font-bold leading-tight">Bus Assistants</h2>
+          <p className="text-muted-foreground text-sm">
             Showing only assistants currently assigned to a bus
           </p>
         </div>
-        <Button onClick={() => setAddingAssistant(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Assistant
-        </Button>
+        <div className="flex w-full sm:w-auto sm:justify-end">
+          <Button className="w-full sm:w-auto" onClick={() => setAddingAssistant(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Assistant
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
       <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search by Name, Email, Phone, or Bus..."
@@ -138,47 +142,47 @@ export default function Assistants() {
       </div>
 
       {/* Table */}
-      <div className="bg-card rounded-lg border overflow-x-auto">
-        <Table>
-          <TableHeader>
+      <div className="bg-card rounded-lg border shadow-sm overflow-x-auto max-h-[70vh]">
+        <Table className="min-w-[720px] text-sm">
+          <TableHeader className="sticky top-0 bg-card/95 backdrop-blur">
             <TableRow>
-              <TableHead>#</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Assigned Bus (Registration)</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">#</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Name</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Email</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Phone</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground">Assigned Bus (Registration)</TableHead>
+              <TableHead className="py-3 text-xs uppercase tracking-wide text-muted-foreground text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={6} className="text-center py-6">
                   Loading assistants...
                 </TableCell>
               </TableRow>
             ) : filteredAssistants.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={6} className="text-center py-6">
                   No assigned assistants found
                 </TableCell>
               </TableRow>
             ) : (
               filteredAssistants.map((assistant, index) => (
-                <TableRow key={assistant.id}>
-                  <TableCell>{index + 1}</TableCell>
-                  <TableCell className="font-medium">{assistant.name}</TableCell>
-                  <TableCell>{assistant.email || '—'}</TableCell>
-                  <TableCell>{assistant.phone || '—'}</TableCell>
-                  <TableCell>{getAssignedBus(assistant.id)}</TableCell>
-                  <TableCell className="text-right space-x-2">
+                <TableRow key={assistant.id} className="hover:bg-muted/40 transition-colors">
+                  <TableCell className="py-3">{index + 1}</TableCell>
+                  <TableCell className="py-3 font-medium">{assistant.name}</TableCell>
+                  <TableCell className="py-3">{assistant.email || '—'}</TableCell>
+                  <TableCell className="py-3">{assistant.phone || '—'}</TableCell>
+                  <TableCell className="py-3">{getAssignedBus(assistant.id)}</TableCell>
+                  <TableCell className="py-3 text-right space-x-2 whitespace-nowrap">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handleViewLocation(assistant)}
                     >
                       <MapPin className="h-4 w-4 mr-1" />
-                      View Location
+                      View
                     </Button>
                     <Button
                       variant="secondary"
@@ -191,7 +195,7 @@ export default function Assistants() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => handleDelete(assistant)}
+                      onClick={() => setDeleteTarget(assistant)}
                     >
                       <Trash className="h-4 w-4 mr-1" />
                       Delete
@@ -227,6 +231,25 @@ export default function Assistants() {
           </div>
         </div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete assistant</DialogTitle>
+            <DialogDescription>
+              {deleteTarget ? `Are you sure you want to delete "${deleteTarget.name}"? This cannot be undone.` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

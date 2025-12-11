@@ -11,9 +11,10 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import toast from "react-hot-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import L from "leaflet";
+import L, { LeafletMouseEvent } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 // Leaflet marker icon
@@ -26,7 +27,7 @@ const markerIcon = L.icon({
 // Map click with reverse geocoding
 function LocationPicker({ onPick }: { onPick: (coords: { lat: number; lng: number; address?: string }) => void }) {
   useMapEvents({
-    async click(e) {
+    async click(e: LeafletMouseEvent) {
       const { lat, lng } = e.latlng;
       try {
         const res = await fetch(
@@ -145,92 +146,220 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
   };
 
   return (
-    <div className="flex justify-center p-6 md:p-10 bg-gray-50 min-h-screen overflow-y-auto">
-      <Card className="w-full max-w-7xl shadow-lg border border-gray-200 bg-white rounded-2xl">
-        <CardHeader>
-          <CardTitle className="text-2xl font-semibold text-gray-800">Add New Student</CardTitle>
-          <p className="text-gray-500 text-sm mt-1">Fill out the student details and select a pickup location.</p>
-        </CardHeader>
-
-        <CardContent className="max-h-[calc(100vh-200px)] overflow-y-auto p-6">
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* LEFT */}
-            <div className="space-y-5">
-              <div>
-                <Label>Full Name</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Student Name" required />
-              </div>
-              <div>
-                <Label>Grade</Label>
-                <Input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Grade 5" required />
-              </div>
-              <div>
-                <Label>School</Label>
-                <Select value={form.schoolId} onValueChange={(val) => setForm({ ...form, schoolId: val })} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select School" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {schools.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Bus</Label>
-                <Select value={form.busId} onValueChange={(val) => setForm({ ...form, busId: val })} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Bus" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {buses.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name} ({b.plateNumber})</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+    <div className="h-full overflow-hidden">
+      <ScrollArea className="h-full pr-4">
+        <form onSubmit={handleSubmit} className="space-y-8 pb-4">
+        {/* Student Information Section */}
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Student Information</h3>
+            <Separator className="mb-5" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="space-y-2.5">
+              <Label htmlFor="name" className="text-sm font-semibold text-gray-700">Full Name *</Label>
+              <Input 
+                id="name"
+                value={form.name} 
+                onChange={(e) => setForm({ ...form, name: e.target.value })} 
+                placeholder="Enter student full name" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
             </div>
-
-            {/* RIGHT */}
-            <div className="space-y-5">
-              <div>
-                <Label>Parent Name</Label>
-                <Input value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="Jane Doe" required />
-              </div>
-              <div>
-                <Label>Parent Phone</Label>
-                <Input type="tel" value={form.parentPhone} onChange={(e) => setForm({ ...form, parentPhone: e.target.value })} placeholder="07XXXXXXXX" required />
-              </div>
-              <div>
-                <Label>Parent Email</Label>
-                <Input type="email" value={form.parentEmail} onChange={(e) => setForm({ ...form, parentEmail: e.target.value })} placeholder="example@email.com" required />
-              </div>
-              <div>
-                <Label>Parent Password</Label>
-                <Input type="password" value={form.parentPassword} onChange={(e) => setForm({ ...form, parentPassword: e.target.value })} placeholder="Set a password for parent" required />
-              </div>
-              <div>
-                <Label>Pickup Location</Label>
-                <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Type or click on map" />
-                <p className="text-xs text-gray-500 mt-1">Type a place name or select on the map below.</p>
-              </div>
+            <div className="space-y-2.5">
+              <Label htmlFor="grade" className="text-sm font-semibold text-gray-700">Grade *</Label>
+              <Input 
+                id="grade"
+                value={form.grade} 
+                onChange={(e) => setForm({ ...form, grade: e.target.value })} 
+                placeholder="e.g., Grade 5" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
             </div>
-
-            {/* MAP */}
-            <div className="col-span-1 md:col-span-2">
-              <Label className="block mb-2 text-gray-700 font-medium">Select on Map</Label>
-              <MapContainer center={[-1.286389, 36.817223]} zoom={13} className="h-[500px] w-full rounded-xl border border-gray-300 shadow-md">
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <LocationPicker onPick={(pos) => { setCoords({ lat: pos.lat, lng: pos.lng }); if (pos.address) setForm({ ...form, location: pos.address }); }} />
-                {coords.lat && <Marker position={[coords.lat, coords.lng]} icon={markerIcon} />}
-              </MapContainer>
-              {coords.lat && <p className="text-sm text-green-600 mt-3">✅ Selected: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</p>}
+            <div className="space-y-2.5">
+              <Label htmlFor="school" className="text-sm font-semibold text-gray-700">School *</Label>
+              <Select value={form.schoolId} onValueChange={(val) => setForm({ ...form, schoolId: val })} required>
+                <SelectTrigger id="school" className="h-12 text-sm w-full focus:ring-2 focus:ring-primary">
+                  <SelectValue placeholder="Select a school" />
+                </SelectTrigger>
+                <SelectContent>
+                  {schools.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-
-            {/* SUBMIT */}
-            <div className="col-span-1 md:col-span-2 flex justify-center pt-6">
-              <Button type="submit" disabled={loading} className="w-full md:w-1/3 py-3 text-lg font-medium">{loading ? "Saving..." : "Add Student"}</Button>
+            <div className="space-y-2.5">
+              <Label htmlFor="bus" className="text-sm font-semibold text-gray-700">Bus *</Label>
+              <Select value={form.busId} onValueChange={(val) => setForm({ ...form, busId: val })} required>
+                <SelectTrigger id="bus" className="h-12 text-sm w-full focus:ring-2 focus:ring-primary">
+                  <SelectValue placeholder="Select a bus" />
+                </SelectTrigger>
+                <SelectContent>
+                  {buses.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>
+                      {b.name} ({b.plateNumber})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+
+        {/* Parent Information Section */}
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Parent Information</h3>
+            <Separator className="mb-5" />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="space-y-2.5">
+              <Label htmlFor="parentName" className="text-sm font-semibold text-gray-700">Parent Name *</Label>
+              <Input 
+                id="parentName"
+                value={form.parentName} 
+                onChange={(e) => setForm({ ...form, parentName: e.target.value })} 
+                placeholder="Enter parent full name" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+            <div className="space-y-2.5">
+              <Label htmlFor="parentPhone" className="text-sm font-semibold text-gray-700">Parent Phone *</Label>
+              <Input 
+                id="parentPhone"
+                type="tel" 
+                value={form.parentPhone} 
+                onChange={(e) => setForm({ ...form, parentPhone: e.target.value })} 
+                placeholder="07XXXXXXXX" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+            <div className="space-y-2.5">
+              <Label htmlFor="parentEmail" className="text-sm font-semibold text-gray-700">Parent Email *</Label>
+              <Input 
+                id="parentEmail"
+                type="email" 
+                value={form.parentEmail} 
+                onChange={(e) => setForm({ ...form, parentEmail: e.target.value })} 
+                placeholder="example@email.com" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+            <div className="space-y-2.5">
+              <Label htmlFor="parentPassword" className="text-sm font-semibold text-gray-700">Parent Password *</Label>
+              <Input 
+                id="parentPassword"
+                type="password" 
+                value={form.parentPassword} 
+                onChange={(e) => setForm({ ...form, parentPassword: e.target.value })} 
+                placeholder="Set a secure password" 
+                required 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Location Section */}
+        <div className="space-y-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Pickup Location</h3>
+            <Separator className="mb-5" />
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-2.5">
+              <Label htmlFor="location" className="text-sm font-semibold text-gray-700">Location Address</Label>
+              <Input 
+                id="location"
+                value={form.location} 
+                onChange={(e) => setForm({ ...form, location: e.target.value })} 
+                placeholder="Type address or click on map below" 
+                className="h-12 text-sm w-full focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              />
+              <p className="text-xs text-muted-foreground mt-1.5">Type a place name or click on the map to select location</p>
+            </div>
+            <div className="space-y-2.5">
+              <Label className="text-sm font-medium text-gray-700 block">Select on Map</Label>
+              <div className="relative w-full rounded-xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white">
+                <div 
+                  className="w-full relative h-[300px] sm:h-[400px] md:h-[450px]" 
+                  style={{ 
+                    position: 'relative',
+                    zIndex: 0
+                  }}
+                >
+                  <MapContainer 
+                    center={[-1.286389, 36.817223]} 
+                    zoom={13} 
+                    style={{ 
+                      height: '100%', 
+                      width: '100%', 
+                      zIndex: 0,
+                      position: 'relative'
+                    }}
+                    className="z-0"
+                    zoomControl={true}
+                    scrollWheelZoom={true}
+                  >
+                    <TileLayer 
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    />
+                    <LocationPicker 
+                      onPick={(pos) => { 
+                        setCoords({ lat: pos.lat, lng: pos.lng }); 
+                        if (pos.address) setForm({ ...form, location: pos.address }); 
+                      }} 
+                    />
+                    {coords.lat && coords.lng && (
+                      <Marker position={[coords.lat, coords.lng]} icon={markerIcon} />
+                    )}
+                  </MapContainer>
+                </div>
+              </div>
+              {coords.lat && coords.lng && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+                  <span className="text-green-600 font-semibold">✓</span>
+                  <p className="text-sm text-green-700 font-medium">
+                    Location selected: <span className="font-mono text-xs">{coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</span>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Submit Button */}
+        <div className="flex justify-end gap-3 pt-6 border-t border-gray-200">
+          <Button 
+            type="submit" 
+            disabled={loading} 
+            className="min-w-[140px] h-11 text-base font-semibold shadow-md hover:shadow-lg transition-all"
+            size="lg"
+          >
+            {loading ? (
+              <>
+                <span className="mr-2 animate-spin">⏳</span>
+                Saving...
+              </>
+            ) : (
+              <>
+                <span className="mr-2">✓</span>
+                Add Student
+              </>
+            )}
+          </Button>
+        </div>
+        </form>
+      </ScrollArea>
     </div>
   );
 }

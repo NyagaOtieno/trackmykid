@@ -12,8 +12,8 @@ import { Toaster, toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
-// Fix Leaflet marker icons (common leaflet + Vite fix)
-delete L.Icon.Default.prototype._getIconUrl;
+// Fix Leaflet marker icons
+delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
     "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
@@ -279,18 +279,10 @@ export default function AssistantPortal() {
     // create a unique id token to avoid duplicates (use timestamp + coords)
     const idToken = `${unitTsValid.getTime()}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
 
-    if (shouldRecord) {
-      if (!routeRef.current.includes(idToken)) {
-        routeRef.current.push(idToken);
-        setRoutePositions((prev) => {
-          const next = [...prev, [lat, lng] as [number, number]];
-          // cap route history to last 200 points
-          return next.slice(-200);
-        });
-      }
-    } else {
-      // if we're outside recording window, do not grow routePositions
-      // but still update map center so the bus is visible
+    const idToken = (ts ?? `${lat}-${lng}`).toString();
+    if (!routeRef.current.includes(idToken)) {
+      routeRef.current.push(idToken);
+      setRoutePositions((prev) => [...prev, [lat, lng] as [number, number]].slice(-100));
     }
 
     // always set map center to latest reading (even if not recording)
