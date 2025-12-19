@@ -71,18 +71,18 @@ function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
-const STUDENTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/students";
-const MANIFESTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/manifests";
-const BUSES_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/buses";
-const USERS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/users";
-const TRACKING_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/tracking/bus-locations";
-const PANIC_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/panic";
+const API_BASE = import.meta.env.VITE_API_URL ?? "https://schooltransport-production.up.railway.app/api";
+
+const STUDENTS_ENDPOINT = `${API_BASE}/students`;
+const MANIFESTS_ENDPOINT = `${API_BASE}/manifests`;
+const BUSES_ENDPOINT = `${API_BASE}/buses`;
+const USERS_ENDPOINT = `${API_BASE}/users`; // Fixed this from /tracking/bus-locations
+const PANIC_ENDPOINT = `${API_BASE}/panic`;
+
+// Use the specific tracking environment variables
+const TRACK_BASE = import.meta.env.VITE_API_URL_TRACK ?? "https://mytrack-production.up.railway.app/api";
+const BUS_LOCATIONS_API = `${TRACK_BASE}/devices/list`;
+const TRACKING_KEY = import.meta.env.VITE_PUBLIC_MYTRACK;
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
@@ -575,24 +575,29 @@ export default function ParentPortal() {
   const users: UserItem[] = usersData ?? [];
 
   const { data: busLocationsRaw } = useQuery({
-    queryKey: ["busLocations"],
-    queryFn: async () => {
-      try {
-        const res = await fetch(TRACKING_ENDPOINT, {
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": TRACKING,
-          },
-        });
-        if (!res.ok) return [];
-        const json = await res.json();
-        return Array.isArray(json) ? json : json?.data ?? [];
-      } catch {
+  queryKey: ["busLocations"],
+  queryFn: async () => {
+    try {
+      const res = await fetch(BUS_LOCATIONS_API, { // Corrected URL
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": TRACKING_KEY, // Use the key from your .env
+        },
+      });
+      if (!res.ok) {
+        console.error("Tracking API Auth Failed:", res.status);
         return [];
       }
-    },
-    refetchInterval: 15000,
-  });
+      const json = await res.json();
+      // Handle different response shapes (some APIs return { data: [...] })
+      return Array.isArray(json) ? json : json?.data ?? [];
+    } catch (error) {
+      console.error("Network error fetching bus locations:", error);
+      return [];
+    }
+  },
+  refetchInterval: 15000,
+});
 
   const busLocations: DeviceItem[] = busLocationsRaw ?? [];
 

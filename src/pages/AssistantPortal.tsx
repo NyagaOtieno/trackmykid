@@ -27,6 +27,7 @@ L.Icon.Default.mergeOptions({
 const API_BASE = import.meta.env.VITE_API_URL ?? "https://schooltransport-production.up.railway.app/api";
 const STUDENTS_API = `${API_BASE}/students`;
 const MANIFEST_API = `${API_BASE}/manifests`;
+const BUSES_API = `${API_BASE}/buses`;
 const BUS_LOCATIONS_API = (import.meta.env.VITE_API_URL_TRACK ?? "https://mytrack-production.up.railway.app/api") + "/devices/list";
 const PANIC_API = `${API_BASE}/panic`;
 
@@ -199,94 +200,82 @@ export default function AssistantPortal() {
     return candidates.length ? candidates[0] : null;
   };
 
-  // --------------------- Bus Tracking ---------------------
+ // --------------------- Bus Tracking ---------------------
   useEffect(() => {
     if (!bus || !Array.isArray(busLocationsData)) return;
 
-    // find unit for this bus (match plate normalized)
+    // 1. Match the plate (using VehicleNo from your API sample)
     const plate = (bus.plateNumber || "").toString().toLowerCase().replace(/\s+/g, "");
+    
     const unit = busLocationsData.find((u: any) => {
-      const number = ((u.number ?? u.plate ?? u.plateNumber ?? u.name) || "").toString().toLowerCase().replace(/\s+/g, "");
-      return number === plate;
+      const trackerPlate = (u.VehicleNo || u.number || u.plate || "").toString().toLowerCase().replace(/\s+/g, "");
+      return trackerPlate === plate;
     });
 
     if (!unit) {
-      // No live unit: use last-known manifest location as fallback (if available)
+      // Fallback if no live unit
       const fallback = getLastKnownManifestLocation();
       if (fallback) {
         setBusLocation({ lat: fallback.lat, lng: fallback.lng, address: "Last known manifest location" });
         setMapCenter([fallback.lat, fallback.lng]);
         setLastUpdated(new Date(fallback.ts).toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }));
-      } else {
-        setBusLocation(null);
-        setLastUpdated(null);
       }
       return;
     }
 
-    // extract lat/lng robustly
-    const lat = Number(unit.lat ?? unit.latitude ?? unit.position?.lat ?? unit.coords?.lat);
-    const lng = Number(unit.lng ?? unit.longitude ?? unit.position?.lng ?? unit.coords?.lng);
+    // 2. Extract coordinates correctly
+    const lat = Number(unit.LastLat);
+    const lng = Number(unit.LastLng);
+
     if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
-      // try fallback to last manifest
-      const fallback = getLastKnownManifestLocation();
-      if (fallback) {
-        toast.info("Using last known manifest location (gps invalid).");
-        setBusLocation({ lat: fallback.lat, lng: fallback.lng, address: "Last known manifest location" });
-        setMapCenter([fallback.lat, fallback.lng]);
-        setLastUpdated(new Date(fallback.ts).toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }));
-      } else {
-        toast.error("GPS coordinates invalid for this bus.");
-        setBusLocation(null);
-        setLastUpdated(null);
-      }
       return;
     }
 
-    // reverse geocode for nicer address (best-effort)
-    (async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/geocode/reverse`, { params: { lat, lon: lng }, headers: { Authorization: `Bearer ${token}` } });
-        const geoData = res.data ?? {};
-        const addr = geoData.display_name ?? geoData.address ?? geoData.name ?? geoData.result ?? "Unknown location";
-        setBusLocation({ lat, lng, address: addr });
-      } catch {
-        setBusLocation({ lat, lng, address: "Address unavailable" });
+  // 3. Reverse Geocode (Using OpenStreetMap Nominatim directly)
+(async () => {
+  try {
+    const res = await axios.get(`https://nominatim.openstreetmap.org/reverse`, {
+      params: {
+        format: 'jsonv2',
+        lat: lat,
+        lon: lng,
+      },
+      headers: { 
+        'Accept-Language': 'en',
+        // It's polite to provide a User-Agent when using Nominatim
+        'User-Agent': 'SchoolTransportApp' 
       }
-    })();
+    });
+    
+    const addr = res.data?.display_name || "Live Location";
+    setBusLocation({ lat, lng, address: addr });
+  } catch (err) {
+    console.warn("Reverse geocoding failed, falling back to coordinates.");
+    setBusLocation({ lat, lng, address: `Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}` });
+  }
+})();
 
-    // determine timestamp for this unit reading (fallback to now)
-    const tsRaw = unit.timestamp ?? unit.time ?? unit.lastUpdated ?? unit.ts ?? unit.updatedAt ?? null;
-    const unitTs = tsRaw ? new Date(tsRaw) : new Date();
-    const unitTsValid = unitTs && !isNaN(unitTs.getTime()) ? unitTs : new Date();
+    // 4. Recording Logic (Breadcrumbs)
+    const unitTs = new Date().getTime();
+    const unitTsValid = new Date(unitTs);
 
-    setLastUpdated(unitTsValid ? unitTsValid.toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }) : new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }));
-
-    // Decide whether to record this point based on firstOnboardTs / lastOffboardTs:
-    // - Start recording only after firstOnboardTs exists and unitTs >= firstOnboardTs
-    // - Stop recording after lastOffboardTs if it exists (don't add if unitTs > lastOffboardTs)
     const shouldRecord = (() => {
-      // if we don't have a start time, do not record (assistant asked to track from first onboard)
       if (!firstOnboardTs) return false;
-      // only start when unit timestamp is >= firstOnboardTs
       if (unitTsValid.getTime() < firstOnboardTs.getTime()) return false;
-      // if there's an end time, stop after it
       if (lastOffboardTs && unitTsValid.getTime() > lastOffboardTs.getTime()) return false;
-      // also allow recording if start exists and either no end or within range
       return true;
     })();
 
-    // create a unique id token to avoid duplicates (use timestamp + coords)
-    const idToken = `${unitTsValid.getTime()}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
-
-    const idToken = (ts ?? `${lat}-${lng}`).toString();
-    if (!routeRef.current.includes(idToken)) {
-      routeRef.current.push(idToken);
-      setRoutePositions((prev) => [...prev, [lat, lng] as [number, number]].slice(-100));
+    if (shouldRecord) {
+      const idToken = `${unitTs}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
+      if (!routeRef.current.includes(idToken)) {
+        routeRef.current.push(idToken);
+        setRoutePositions((prev) => [...prev, [lat, lng] as [number, number]].slice(-100));
+      }
     }
 
-    // always set map center to latest reading (even if not recording)
-    setMapCenter([lat, lng]);
+    setLastUpdated(new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }));
+
   }, [busLocationsData, bus, firstOnboardTs, lastOffboardTs, token]);
 
   // --------------------- Mutations ---------------------
@@ -383,11 +372,14 @@ export default function AssistantPortal() {
     return null;
   };
 
-  const latestUnit = useMemo(() => {
-    if (!bus || !Array.isArray(busLocationsData)) return null;
-    const plate = (bus.plateNumber || "").toLowerCase().replace(/\s+/g, "");
-    return busLocationsData.find((u: any) => ((u.number || u.plate || u.plateNumber || u.name || "").toString().toLowerCase().replace(/\s+/g, "")) === plate) ?? null;
-  }, [busLocationsData, bus]);
+const latestUnit = useMemo(() => {
+  if (!bus || !Array.isArray(busLocationsData)) return null;
+  const plate = (bus.plateNumber || "").toLowerCase().replace(/\s+/g, "");
+  // Changed "u.number" to "u.VehicleNo" to match your sample
+  return busLocationsData.find((u: any) => 
+    ((u.VehicleNo || u.number || "").toString().toLowerCase().replace(/\s+/g, "")) === plate
+  ) ?? null;
+}, [busLocationsData, bus]);
 
   const latestSpeed = latestUnit ? (latestUnit.speed ?? latestUnit.speed_kmh ?? latestUnit.velocity ?? null) : null;
 
@@ -553,61 +545,100 @@ export default function AssistantPortal() {
         </Card>
 
         {/* Bus Info & Map */}
-        <Card>
-          <CardHeader><CardTitle>My Bus: {bus.plateNumber}</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-4">
-              <Badge>Driver: {bus.driver?.name || "Unknown"}</Badge>
-              <Badge>Latest Speed: {latestSpeed ?? "N/A"} km/h</Badge>
-              <Badge>Last Updated: {lastUpdated ?? "N/A"}</Badge>
-              <Badge>Current Location: {busLocation?.address ?? "N/A"}</Badge>
-            </div>
+       {/* Bus Info & Map */}
+<Card>
+  <CardHeader>
+    <CardTitle className="flex justify-between items-center">
+      <span>My Bus: {bus.plateNumber}</span>
+      {bus.driver?.phone && (
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="flex items-center gap-2 border-green-600 text-green-700 hover:bg-green-50"
+          onClick={() => window.location.href = `tel:${bus.driver.phone}`}
+        >
+          <span className="text-lg">📞</span> Call Driver
+        </Button>
+      )}
+    </CardTitle>
+  </CardHeader>
+  <CardContent className="space-y-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Driver Badge */}
+      <div className="p-3 bg-muted rounded-lg border">
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">Driver</p>
+        <p className="font-semibold">{bus.driver?.name || "Not Assigned"}</p>
+      </div>
+      
+      {/* Speed Badge */}
+      <div className="p-3 bg-muted rounded-lg border">
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">Latest Speed</p>
+        <p className="font-semibold">{latestSpeed ?? "0"} km/h</p>
+      </div>
 
-            {/* Map: only show when we have a busLocation */}
-            {busLocation && (
-              <MapContainer
-                key={`${busLocation.lat}-${busLocation.lng}`} // ensures Leaflet refreshes center when changed
-                center={mapCenter || [busLocation.lat, busLocation.lng]}
-                zoom={17}
-                scrollWheelZoom
-                style={{ height: "400px", width: "100%" }}
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {/* Polyline for the route */}
-                {routePositions.length > 0 && (
-                  <Polyline
-                    positions={routePositions.filter((pos, i, arr) => i === 0 || pos[0] !== arr[i - 1][0] || pos[1] !== arr[i - 1][1])}
-                  />
-                )}
+      {/* Sync Badge */}
+      <div className="p-3 bg-muted rounded-lg border">
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">Last Sync</p>
+        <p className="font-semibold text-sm">{lastUpdated?.split(',')[1] ?? "N/A"}</p>
+      </div>
 
-                {/* Markers for each route point */}
-                {routePositions.map((pos, idx) => (
-                  <Marker
-                    key={idx}
-                    position={pos}
-                    icon={
-                      idx === routePositions.length - 1
-                        ? new L.Icon({
-                            iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-red.png",
-                            iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-                            shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-                            iconSize: [25, 41],
-                            iconAnchor: [12, 41],
-                          })
-                        : new L.Icon.Default()
-                    }
-                  >
-                    <Popup>
-                      {`Point ${idx + 1}`}<br />
-                      Lat: {pos[0]} <br />
-                      Lng: {pos[1]}
-                    </Popup>
-                  </Marker>
-                ))}
+      {/* Status Badge */}
+      <div className="p-3 bg-muted rounded-lg border">
+        <p className="text-[10px] text-muted-foreground uppercase font-bold">Bus Status</p>
+        <Badge className={latestSpeed > 0 ? "bg-green-500" : "bg-slate-500"}>
+          {latestSpeed > 0 ? "Moving" : "Stationary"}
+        </Badge>
+      </div>
+    </div>
 
-                <AutoCenter center={mapCenter} />
-              </MapContainer>
-            )}
+    {/* Location Bar */}
+    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex items-start gap-2">
+      <span className="mt-1">📍</span>
+      <div>
+        <p className="text-[10px] text-blue-700 font-bold uppercase">Current Location</p>
+        <p className="text-sm text-blue-900">{busLocation?.address || "Locating bus..."}</p>
+      </div>
+    </div>
+
+           {/* Map: only show when we have a busLocation */}
+{busLocation && (
+  <MapContainer
+    center={mapCenter || [busLocation.lat, busLocation.lng]}
+    zoom={15}
+    scrollWheelZoom
+    style={{ height: "400px", width: "100%", borderRadius: "8px" }}
+  >
+    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    
+    {/* Polyline: Shows the path taken */}
+    {routePositions.length > 1 && (
+      <Polyline
+        positions={routePositions}
+        pathOptions={{ color: 'blue', weight: 4, opacity: 0.6 }}
+      />
+    )}
+
+    {/* Only one Marker: The current bus position */}
+    <Marker 
+      position={[busLocation.lat, busLocation.lng]}
+      icon={new L.Icon({
+        iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
+        iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+        shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+      })}
+    >
+      <Popup>
+        <strong>{bus.plateNumber}</strong><br />
+        {busLocation.address}<br />
+        Speed: {latestSpeed ?? 0} km/h
+      </Popup>
+    </Marker>
+
+    <AutoCenter center={mapCenter} />
+  </MapContainer>
+)}
 
           </CardContent>
         </Card>
