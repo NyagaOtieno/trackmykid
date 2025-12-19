@@ -84,18 +84,22 @@ export default function AssistantPortal() {
     toast.success("Logged out successfully!");
     navigate("/");
   };
+// Inside BusAssistantPortal.tsx (or your check-in component)
 
-  const sendSmsNotification = async (payload: any) => {
-    try {
-      await axios.post(`${API_BASE}/sms/manifest`, payload, { headers: { Authorization: `Bearer ${token}` } });
-      toast.message("SMS notification sent (backend).");
-    } catch (err: any) {
-      console.warn("SMS notify failed:", err?.response?.data ?? err.message);
-      if (err?.response?.status && err.response.status !== 404) {
-        toast.error(`SMS send failed: ${err?.response?.data?.message || err.message}`);
-      }
-    }
-  };
+const handleStatusUpdate = async (manifestId: number, status: string) => {
+  try {
+        await axios.put(
+      `${API_BASE}/manifests/${manifestId}`, 
+      { status }, 
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    toast.success(`Student ${status === 'CHECKED_IN' ? 'Boarded' : 'Dropped Off'}`);
+  } catch (err: any) {
+    console.error("Update failed:", err.response?.data || err.message);
+    toast.error("Failed to update status on server.");
+  }
+};
 
   // --------------------- Data Fetching ---------------------
 
