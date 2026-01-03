@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -373,6 +373,29 @@ async function getBusesWithLocations(): Promise<Bus[]> {
   return withLocations;
 }
 
+// ---------------- Snap GPS points to road (OSRM) ----------------
+async function snapToRoad(points: { lat: number; lng: number }[]) {
+  if (points.length < 2) return [];
+
+  const coords = points
+    .map(p => `${p.lng},${p.lat}`)
+    .join(";");
+
+const radiuses = points.map(() => 10).join(";"); // tighter snap
+
+const url = `https://router.project-osrm.org/match/v1/driving/${coords}?geometries=geojson&overview=full&radiuses=${radiuses}&steps=false&annotations=false`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (!data.matchings?.length) return [];
+
+  return data.matchings[0].geometry.coordinates.map(
+    ([lng, lat]: [number, number]) => [lat, lng]
+  );
+}
+
+
 // ---------------- Main Component ----------------
 export default function Tracking() {
   // ----------- TEST MyTrack API (top of component) -----------
@@ -398,7 +421,17 @@ export default function Tracking() {
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<Bus | null>(null);
+  type RoutePoint = {
+  lat: number;
+  lng: number;
+  ts: number;
+};
 
+  const [routePositions, setRoutePositions] = useState<RoutePoint[]>([]);
+  const [snappedRoute, setSnappedRoute] = useState<[number, number][]>([]);
+  const [drawIndex, setDrawIndex] = useState<number | null>(null);
+  const prevVehicleId = useRef<string | null>(null);
+  const routeStore = useRef<Record<string, RoutePoint[]>>({});
   const totalVehicles = buses.length;
   const liveVehicles = buses.filter((v: any) => !v.__fallback).length;
   const standingVehicles = buses.filter(
@@ -411,6 +444,115 @@ export default function Tracking() {
       v.plateNumber?.toLowerCase().includes(search.toLowerCase())
     );
   }, [buses, search]);
+
+// ---------------- Handle vehicle switch (restore route, reset animation) ----------------
+useEffect(() => {
+  if (!selectedVehicle?.busId) return;
+
+  const stored = routeStore.current[selectedVehicle.busId] || [];
+
+  const now = Date.now();
+
+  // Ensure route ends at current vehicle position
+  const withLivePoint =
+    selectedVehicle.lat != null && selectedVehicle.lng != null
+      ? [
+          ...stored.filter(p => p.lat != null && p.lng != null),
+          { lat: selectedVehicle.lat, lng: selectedVehicle.lng, ts: now }
+        ]
+      : stored;
+
+  routeStore.current[selectedVehicle.busId] = withLivePoint;
+
+  prevVehicleId.current = selectedVehicle.busId;
+
+  setRoutePositions(withLivePoint);
+  setSnappedRoute([]);
+  setDrawIndex(null);
+}, [selectedVehicle?.busId]);
+
+// ---------------- Accumulate route for selected vehicle ----------------
+useEffect(() => {
+  if (
+    selectedVehicle?.lat == null ||
+    selectedVehicle?.lng == null ||
+    !selectedVehicle.busId
+  ) {
+    return;
+  }
+
+  const now = Date.now();
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  setRoutePositions((prev) => {
+    // Filter to last 24 hours
+    const recent = prev.filter(p => now - p.ts <= DAY_MS);
+
+    // Vehicle switched → reset visible route only
+ 
+    const last = recent[recent.length - 1];
+
+  if (!last) {
+  const initial = [
+    { lat: selectedVehicle.lat, lng: selectedVehicle.lng, ts: now }
+  ];
+
+  routeStore.current[selectedVehicle.busId] = initial; // ✅ persist
+  return initial;
+}
+
+    const moved =
+      Math.abs(last.lat - selectedVehicle.lat) > 0.00005 ||
+      Math.abs(last.lng - selectedVehicle.lng) > 0.00005;
+
+    if (!moved) return recent;
+
+   const updated = [
+  ...recent,
+  { lat: selectedVehicle.lat, lng: selectedVehicle.lng, ts: now }
+];
+routeStore.current[selectedVehicle.busId] = updated;
+
+return updated;
+
+  });
+}, [selectedVehicle?.lat, selectedVehicle?.lng, selectedVehicle?.busId]);
+
+// ---------------- Snap route to road ----------------
+useEffect(() => {
+  if (routePositions.length < 2) return;
+
+  const snapPoints = routePositions
+  .filter(p => p.lat != null && p.lng != null)
+  .slice(-20);
+
+  snapToRoad(snapPoints).then((snapped) => {
+    if (snapped.length > 1) {
+      setSnappedRoute(snapped);
+    } else {
+      setSnappedRoute([]); // fallback to raw
+    }
+  });
+}, [routePositions]);
+
+useEffect(() => {
+  if (snappedRoute.length < 2) return;
+
+  setDrawIndex(1);
+  const interval = setInterval(() => {
+    setDrawIndex((i) => {
+      if (i == null || i >= snappedRoute.length) {
+        clearInterval(interval);
+        return snappedRoute.length;
+      }
+      return i + 1;
+    });
+  }, 120);
+
+  return () => clearInterval(interval);
+}, [snappedRoute]);
+
+
 
   // Default center to Nairobi (no auto-selection)
   const center: [number, number] = [-1.2921, 36.8219];
@@ -528,26 +670,68 @@ export default function Tracking() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="h-[420px] sm:h-[520px] xl:h-[620px]">
-              <MapContainer center={center} zoom={12} className="h-full w-full" zoomControl>
-                <TileLayer
-                  attribution='&copy; OpenStreetMap contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
+  <MapContainer center={center} zoom={12} className="h-full w-full" zoomControl={true}>
+  <TileLayer
+    attribution='&copy; OpenStreetMap contributors'
+    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+  />
 
-                {filteredLocations.map((bus: any) => {
-                  const isSelected = selectedVehicle?.busId === bus.busId;
-                  return (
-                    <PersistentMarker
-                      key={bus.busId}
-                      bus={bus}
-                      isSelected={isSelected}
-                      onSelect={() => setSelectedVehicle(bus)}
-                    />
-                  );
-                })}
+  {filteredLocations.map((bus: Bus, index) => {
+    const isSelected = selectedVehicle?.busId === bus.busId;
+    const key = bus.busId || bus.plateNumber || index;
 
-                <FlyToLocation selectedVehicle={selectedVehicle} />
-              </MapContainer>
+    // Ensure valid coordinates
+    const lat = bus.lat ?? -1.2921;
+    const lng = bus.lng ?? 36.8219;
+
+    return (
+      <PersistentMarker
+        key={key}
+        bus={{ ...bus, lat, lng }}
+        isSelected={isSelected}
+        onSelect={() => setSelectedVehicle(bus)}
+      />
+    );
+  })}
+
+  {/* Snapped route */}
+  {snappedRoute.length > 1 && (
+    <Polyline
+      positions={
+  drawIndex
+    ? [
+        [selectedVehicle!.lat, selectedVehicle!.lng],
+        ...snappedRoute.slice(0, drawIndex)
+      ]
+    : snappedRoute
+}
+
+      pathOptions={{
+        color: "#2563eb",
+        weight: 6,
+        opacity: 0.9,
+      }}
+    />
+  )}
+
+  {/* Raw route fallback */}
+  {snappedRoute.length === 0 && routePositions.length > 1 && (
+    <Polyline
+      positions={routePositions
+        .filter(p => p.lat != null && p.lng != null)
+        .map(p => [p.lat!, p.lng!])}
+      pathOptions={{
+        color: "#dc2626",
+        weight: 3,
+        dashArray: "6,6",
+      }}
+    />
+  )}
+
+  <FlyToLocation selectedVehicle={selectedVehicle} />
+</MapContainer>
+
+
             </div>
           </CardContent>
         </Card>

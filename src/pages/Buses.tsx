@@ -141,7 +141,7 @@ export default function Buses() {
           <Button variant="outline" onClick={handleExportExcel} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4 mr-2" /> Excel
           </Button>
-          <Button onClick={() => handleDialogOpen()} className="flex-1 sm:flex-none">
+          <Button onClick={() => openDialog(null)} className="flex-1 sm:flex-none">
             <Plus className="h-4 w-4 mr-2" /> Add Bus
           </Button>
         </div>

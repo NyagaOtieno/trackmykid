@@ -46,7 +46,14 @@ export default function AssistantPortal() {
 
   // BUS & STUDENT STATE
   const [busLocation, setBusLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
-  const [routePositions, setRoutePositions] = useState<Array<[number, number]>>([]);
+  type RoutePoint = {
+  lat: number;
+  lng: number;
+  ts: number; // timestamp (ms)
+};
+
+const [routePositions, setRoutePositions] = useState<RoutePoint[]>([]);
+
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [autoFollow, setAutoFollow] = useState<boolean>(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
@@ -55,6 +62,15 @@ export default function AssistantPortal() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const last24hRoute = useMemo(() => {
+  const now = Date.now();
+  const cutoff = now - 24 * 60 * 60 * 1000;
+
+  return routePositions
+    .filter(p => p.ts >= cutoff)
+    .sort((a, b) => a.ts - b.ts);
+}, [routePositions]);
+
 
   // Redirect if not logged in
   useEffect(() => {
@@ -270,13 +286,29 @@ const handleStatusUpdate = async (manifestId: number, status: string) => {
       return true;
     })();
 
-    if (shouldRecord) {
-      const idToken = `${unitTs}-${lat.toFixed(6)}-${lng.toFixed(6)}`;
-      if (!routeRef.current.includes(idToken)) {
-        routeRef.current.push(idToken);
-        setRoutePositions((prev) => [...prev, [lat, lng] as [number, number]].slice(-100));
-      }
+   if (shouldRecord) {
+  setRoutePositions((prev) => {
+    const now = Date.now();
+
+    if (!prev.length) {
+      return [{ lat, lng, ts: now }];
     }
+
+    const last = prev[prev.length - 1];
+
+    const moved =
+      Math.abs(last.lat - lat) > 0.00005 ||
+      Math.abs(last.lng - lng) > 0.00005;
+
+    if (!moved) return prev;
+
+    return [
+      ...prev,
+      { lat, lng, ts: now },
+    ].slice(-500); // keep last 24h safely
+  });
+}
+
 
     setLastUpdated(new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" }));
 
@@ -617,9 +649,9 @@ const latestUnit = useMemo(() => {
     {/* Polyline: Shows the path taken */}
     {routePositions.length > 1 && (
       <Polyline
-        positions={routePositions}
-        pathOptions={{ color: 'blue', weight: 4, opacity: 0.6 }}
-      />
+  positions={routePositions.map(p => [p.lat, p.lng])}
+  pathOptions={{ color: "#2563eb", weight: 5, opacity: 0.7 }}
+/>
     )}
 
     {/* Only one Marker: The current bus position */}
