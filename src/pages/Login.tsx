@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,28 +13,35 @@ import { toast } from "sonner";
 import api from "@/api/axiosConfig";
 import { Eye, EyeOff } from "lucide-react";
 
-// ✅ Backend endpoints (baseURL already handled by api)
+// Backend endpoint
 const AUTH_URL = "/auth/login";
-const FORGOT_URL = "/auth/forgot-password";
 
 export default function Login() {
   const navigate = useNavigate();
+  const otpTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ===== Login state =====
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // ✅ Redirect if already authenticated
+  // ===== Forgot password flow =====
+  const [step, setStep] = useState<"login" | "forgotPhone" | "resetPassword">("login");
+  const [phone, setPhone] = useState("");
+  const [otp, setOTP] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [otpSent, setOTPSent] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
+
+  // ===== Redirect if already logged in =====
   useEffect(() => {
     const token = localStorage.getItem("token");
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
     const isAuthenticated = localStorage.getItem("isAuthenticated") === "true";
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
 
     if (token && isAuthenticated) {
-      // Only redirect based on role
       switch (user.role) {
         case "ADMIN":
           navigate("/dashboard");
@@ -50,33 +57,38 @@ export default function Login() {
           break;
         default:
           localStorage.clear();
-          navigate("/");
       }
     }
   }, [navigate]);
 
+  // ===== Cleanup timer on unmount =====
+  useEffect(() => {
+    return () => {
+      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+    };
+  }, []);
+
+  // ===== Login =====
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      // 🚀 Login via api instance
       const response = await api.post(AUTH_URL, { email, password });
-      const { token, user } = response.data || {};
+      const { token, user } = response.data;
 
-      if (!token || !user) {
-        throw new Error("Invalid login response from server");
-      }
+      if (!token || !user) throw new Error("Invalid login response");
 
-      // ✅ Save session
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("isAuthenticated", "true");
 
-      toast.success(`Welcome back, ${user.name || "User"}!`);
+      toast.success(`Welcome back, ${user.name || "User"}`);
 
-      // ✅ Redirect based on role
       switch (user.role) {
+        case "ADMIN":
+          navigate("/dashboard");
+          break;
         case "PARENT":
           navigate("/parent-portal");
           break;
@@ -86,53 +98,101 @@ export default function Login() {
         case "ASSISTANT":
           navigate("/assistant-portal");
           break;
-        case "ADMIN":
-          navigate("/dashboard"); // Only admin can access /dashboard
-          break;
         default:
-          // Block non-admin from dashboard
-          toast.error("You are not authorized to access the admin dashboard.");
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem("isAuthenticated");
-          navigate("/"); // Redirect to home/login
+          throw new Error("Unauthorized role");
       }
-    } catch (error: any) {
-      console.error("Login error:", error);
-      localStorage.removeItem("token");
-      localStorage.removeItem("isAuthenticated");
-      localStorage.removeItem("user");
-      toast.error(
-        error.response?.data?.message || "Login failed. Check your credentials."
-      );
+    } catch (err: any) {
+      localStorage.clear();
+      toast.error(err.response?.data?.message || "Login failed");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  // ===== Send OTP =====
+  const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotEmail) {
-      toast.error("Please enter your email.");
-      return;
-    }
+    if (!phone) return toast.error("Enter phone number");
+
+    setIsLoading(true);
+
     try {
-      await api.post(FORGOT_URL, { email: forgotEmail });
-      toast.success("Password reset link sent to your email.");
-      setIsForgotOpen(false);
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Failed to send reset link."
-      );
+      const res =await api.post("/auth/forgot-password", { phone });
+
+
+      if (!res.data?.success) {
+        return toast.error(res.data?.message || "Failed to send OTP");
+      }
+
+      toast.success(res.data.message);
+      setStep("resetPassword");
+      setOTPSent(true);
+      setResendTimer(600);
+
+      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+
+      otpTimerRef.current = setInterval(() => {
+        setResendTimer((prev) => {
+          if (prev <= 1) {
+            if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+            setOTPSent(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch {
+      toast.error("Network error. Try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ===== Reset Password =====
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (newPassword !== confirmPassword) {
+      return toast.error("Passwords do not match");
+    }
+
+    if (!otp) {
+      return toast.error("Enter OTP");
+    }
+
+    setIsLoading(true);
+
+    try {
+      const res = await api.post("/auth/reset-password", {
+  phone,
+  otp,
+  newPassword,
+});
+
+
+      if (!res.data?.success) {
+        return toast.error(res.data?.message || "Reset failed");
+      }
+
+      toast.success("Password reset successful");
+      setStep("login");
+      setPhone("");
+      setOTP("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch {
+      toast.error("Network error. Try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
+        <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">
-            🎓 SchoolTrack Transport
+            SchoolTrack Transport
           </CardTitle>
           <CardDescription className="text-center">
             Enter your credentials to access the system
@@ -140,93 +200,78 @@ export default function Login() {
         </CardHeader>
 
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
-              </label>
+          {step === "login" && (
+            <form onSubmit={handleSubmit} className="space-y-4">
               <Input
-                id="email"
                 type="email"
-                placeholder="your@email.com"
+                placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                disabled={isLoading}
               />
-            </div>
 
-            <div className="space-y-2 relative">
-              <label htmlFor="password" className="text-sm font-medium">
-                Password
-              </label>
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-8 text-gray-500"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-
-            <div className="text-right">
-              <button
-                type="button"
-                className="text-sm text-blue-600 hover:underline"
-                onClick={() => setIsForgotOpen(true)}
-              >
-                Forgot Password?
-              </button>
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
-
-          {/* Forgot Password Modal */}
-          {isForgotOpen && (
-            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 shadow-lg w-[90%] max-w-sm">
-                <h2 className="text-lg font-semibold mb-2 text-center">
-                  Reset Password
-                </h2>
-                <p className="text-sm text-gray-500 mb-4 text-center">
-                  Enter your email to receive a password reset link.
-                </p>
-                <form onSubmit={handleForgotPassword} className="space-y-3">
-                  <Input
-                    type="email"
-                    placeholder="Enter your email"
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    required
-                  />
-                  <div className="flex gap-2">
-                    <Button type="submit" className="w-full">
-                      Send Link
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setIsForgotOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-2.5 text-gray-500"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
-            </div>
+
+              <div className="text-right">
+                <button
+                  type="button"
+                  className="text-sm text-blue-600"
+                  onClick={() => setStep("forgotPhone")}
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <Button className="w-full" disabled={isLoading}>
+                {isLoading ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          )}
+
+          {step === "forgotPhone" && (
+            <form onSubmit={handleSendOTP} className="space-y-3">
+              <Input
+                placeholder="Phone number"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                required
+              />
+              <Button className="w-full">Send OTP</Button>
+            </form>
+          )}
+
+          {step === "resetPassword" && (
+            <form onSubmit={handleResetPassword} className="space-y-3">
+              <Input placeholder="OTP" value={otp} onChange={(e) => setOTP(e.target.value)} />
+              <Input
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="Confirm password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              <Button className="w-full">Reset password</Button>
+            </form>
           )}
         </CardContent>
       </Card>
