@@ -11,16 +11,25 @@ const api = axios.create({
 });
 
 // ✅ Automatically attach Bearer token (if available)
+// ✅ Automatically attach Bearer token (if available)
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token =
+      localStorage.getItem("token") ||
+      sessionStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      sessionStorage.getItem("accessToken");
+
     if (token) {
+      config.headers = config.headers ?? {};
       config.headers.Authorization = `Bearer ${token}`;
     }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
+
 
 // ✅ Handle expired tokens or unauthorized responses
 api.interceptors.response.use(

@@ -1,684 +1,482 @@
+// src/pages/Dashboard.tsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import axios from "axios";
-import { useState, useMemo, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Bus, Users, ClipboardList, MapPin } from "lucide-react";
+import { Loader2, Bus, Users, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
 import { createBusIcon } from "@/utils/vehicleIcon";
+import { getStudents, getBuses, getManifests, getUsers } from "@/api/axiosConfig";
+import { getSession } from "@/lib/auth";
 
-/**
- * Dashboard (single-file)
- *
- * - Keeps existing APIs (students, buses, manifests, users).
- * - Replaces the old tracking call with mytrack-production endpoints:
- *   - GET /api/devices/list
- *   - GET /api/devices/latest?imei=
- * - Uses X-API-Key header when calling mytrack-production.
- */
+const ROWS_PER_PAGE = 10;
 
-// === CONFIG ===
-const TRACK_API_BASE = "https://mytrack-production.up.railway.app";
-const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
+/* ---------------- helpers ---------------- */
+const unwrapArray = (payload: any) => {
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.data?.data)) return payload.data.data;
+  if (Array.isArray(payload)) return payload;
+  return [];
+};
 
-// --- API calls (existing endpoints kept) ---
-const getStudents = async () => {
-  const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/students"
+const toNum = (v: any) => {
+  const n = typeof v === "string" ? Number(v) : v;
+  return Number.isFinite(n) ? (n as number) : null;
+};
+
+const safeDate = (v: any) => {
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+function isSameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
-  return data.data || [];
-};
+}
 
-const getBuses = async () => {
-  const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/buses"
-  );
-  return data || [];
-};
-
-const getManifests = async () => {
-  const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/manifests"
-  );
-  return data.data || [];
-};
-
-const getUsers = async () => {
-  const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/users"
-  );
-  return data.data || [];
-};
-
-// --- TrackMyKid API helpers (use X-API-Key header) ---
-const trackAxios = axios.create({
-  baseURL: TRACK_API_BASE,
-  headers: {
-    "X-API-Key": TRACK_API_KEY,
-  },
-});
-
-const getDevices = async () => {
-  const { data } = await trackAxios.get("/api/devices/list");
-  // support responses that are either array or { data: [...] }
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.data)) return data.data;
-  return data || [];
-};
-
-const getDeviceLatest = async (imei: string) => {
-  try {
-    const { data } = await trackAxios.get("/api/devices/latest", { params: { imei } });
-    const payload = data?.data ?? data ?? null;
-    if (!payload) return null;
-
-    // Accept both { latitude, longitude } and { lat, lng }
-    let latitude = payload.latitude ?? payload.lat ?? null;
-    let longitude = payload.longitude ?? payload.lng ?? null;
-    const timestamp = payload.timestamp ?? payload.time ?? payload.server_time ?? null;
-
-    // Convert to numbers where possible
-    latitude = latitude !== null && latitude !== undefined ? Number(latitude) : null;
-    longitude = longitude !== null && longitude !== undefined ? Number(longitude) : null;
-
-    // Defensive swap: if latitude appears > 90 but longitude <= 90, swap them
-    if (
-      Number.isFinite(latitude) &&
-      Math.abs(latitude) > 90 &&
-      Number.isFinite(longitude) &&
-      Math.abs(longitude) <= 90
-    ) {
-      const tmp = latitude;
-      latitude = longitude;
-      longitude = tmp;
-    }
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-
-    return {
-      latitude,
-      longitude,
-      timestamp,
-      raw: payload,
-    };
-  } catch (err) {
-    console.error("getDeviceLatest error", imei, err);
-    return null;
-  }
-};
-
-// --- Reverse geocode helper (Nominatim) ---
+/* ---------------- reverse geocode cache ---------------- */
 const locationCache: Record<string, string> = {};
+
 const getLocationFromLatLon = async (lat: number, lon: number) => {
-  const key = `${lat},${lon}`;
+  const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
   if (locationCache[key]) return locationCache[key];
+
   try {
-    const { data } = await axios.get(`https://nominatim.openstreetmap.org/reverse`, {
-      params: { format: "json", lat, lon },
-    });
-    const address = data.display_name || "Unknown location";
+    const url = new URL("https://nominatim.openstreetmap.org/reverse");
+    url.searchParams.set("format", "json");
+    url.searchParams.set("lat", String(lat));
+    url.searchParams.set("lon", String(lon));
+
+    const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+    const json = await res.json();
+    const address = json?.display_name || "Unknown location";
     locationCache[key] = address;
     return address;
-  } catch (err) {
-    console.error("Reverse geocode error:", err);
+  } catch {
     return "Unknown location";
   }
 };
 
-
 export default function Dashboard() {
-  // UI state
+  const session = typeof window !== "undefined" ? getSession() : null;
+  const tokenExists = !!session?.token;
+
   const [studentSearch, setStudentSearch] = useState("");
   const [studentPage, setStudentPage] = useState(1);
   const [tripSearch, setTripSearch] = useState("");
   const [tripPage, setTripPage] = useState(1);
-  const rowsPerPage = 10;
 
-  // Data state
   const [studentLocations, setStudentLocations] = useState<Record<number, string>>({});
   const [manifestLocations, setManifestLocations] = useState<Record<number, any>>({});
-  const [driversMap, setDriversMap] = useState<Record<number, any>>({});
-  const [devices, setDevices] = useState<any[]>([]);
-  const manifestDeviceMapRef = useRef<Record<number, any>>({}); // manifestId -> device
 
-  // Queries for existing endpoints
-  const { data: students = [], isLoading: loadingStudents, error: errorStudents } = useQuery({
+  /* ---------------- Queries ---------------- */
+  const studentsQ = useQuery({
     queryKey: ["students"],
     queryFn: getStudents,
+    enabled: tokenExists,
   });
 
-  const { data: buses = [], isLoading: loadingBuses, error: errorBuses } = useQuery({
+  const busesQ = useQuery({
     queryKey: ["buses"],
     queryFn: getBuses,
+    enabled: tokenExists,
   });
 
-  const { data: manifests = [], isLoading: loadingManifests, error: errorManifests } = useQuery({
+  const manifestsQ = useQuery({
     queryKey: ["manifests"],
     queryFn: getManifests,
+    enabled: tokenExists,
   });
 
-  const { data: users = [], isLoading: loadingUsers, error: errorUsers } = useQuery({
+  const usersQ = useQuery({
     queryKey: ["users"],
     queryFn: getUsers,
+    enabled: tokenExists,
   });
 
-  // Fetch devices (track backend)
-  const { data: devicesData = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
-    queryKey: ["track-devices"],
-    queryFn: getDevices,
-  });
+  const students = unwrapArray(studentsQ.data);
+  const buses = unwrapArray(busesQ.data);
+  const manifests = unwrapArray(manifestsQ.data);
+  const users = unwrapArray(usersQ.data);
 
-  // Sync devicesData to devices state
-  useEffect(() => {
-    if (devicesData) {
-      setDevices(devicesData || []);
-    }
-  }, [devicesData]);
+  const studentsCount = studentsQ.data?.count ?? students.length ?? 0;
+  const busesCount = busesQ.data?.count ?? buses.length ?? 0;
 
-  // Map driverId -> driver object
   useEffect(() => {
-    if (users.length > 0) {
-      const map: Record<number, any> = {};
-      users.forEach((u: any) => {
-        if (u.role === "DRIVER") map[u.id] = u;
-      });
-      setDriversMap(map);
+    if (studentsQ.isError || busesQ.isError || manifestsQ.isError || usersQ.isError) {
+      toast.error("Dashboard API error (check Bearer token).");
     }
+  }, [studentsQ.isError, busesQ.isError, manifestsQ.isError, usersQ.isError]);
+
+  /* ---------------- Drivers Map ---------------- */
+  const driversMap = useMemo(() => {
+    const map: Record<number, any> = {};
+    users.forEach((u: any) => {
+      if (String(u?.role ?? "").toUpperCase() === "DRIVER") {
+        map[u.id] = u;
+      }
+    });
+    return map;
   }, [users]);
 
-  // Error toast
-  const errorOccurred = errorStudents || errorBuses || errorManifests || errorUsers || errorDevices;
-  useEffect(() => {
-    if (errorOccurred) toast.error("Failed to load some dashboard data. Please refresh.");
-  }, [errorOccurred]);
-
-  const isLoading =
-    loadingStudents || loadingBuses || loadingManifests || loadingUsers || loadingDevices;
-
-  // Today's manifests
-  const today = new Date().toISOString().split("T")[0];
-  const todaysManifests = manifests.filter((m: any) => m.date?.startsWith(today));
-
-  // Student location reverse-geocode (unchanged)
-  useEffect(() => {
-    students.forEach(async (s: any) => {
-      const lat = s.student?.latitude ?? s.latitude;
-      const lon = s.student?.longitude ?? s.longitude;
-      if (lat && lon && !studentLocations[s.id]) {
-        const loc = await getLocationFromLatLon(lat, lon);
-        setStudentLocations((prev) => ({ ...prev, [s.id]: loc }));
-      }
+  /* ---------------- Today Manifests ---------------- */
+  const todaysManifests = useMemo(() => {
+    const today = new Date();
+    return manifests.filter((m: any) => {
+      const dt = safeDate(m.date || m.createdAt || m.updatedAt);
+      return dt ? isSameDay(dt, today) : false;
     });
-  }, [students]);
+  }, [manifests]);
 
-  // Normalize plate helper
-  const normalizePlate = (v: any) => {
-    if (!v) return "";
-    return String(v).replace(/[\s\-]/g, "").toUpperCase();
-  };
+  const todaysTripsCount = todaysManifests.length;
 
-  // Resolve device match & fetch initial locations for manifests
-  useEffect(() => {
-    // require devices to be loaded
-    if (!devices || devices.length === 0) return;
-
-    // iterate manifests for today
-    todaysManifests.forEach(async (m: any) => {
-      // skip if already resolved
-      if (manifestLocations[m.id]) return;
-
-      const busObj = m.bus || {};
-      const candidates = [
-        busObj.registration,
-        busObj.vehicle_no,
-        busObj.name,
-        m.bus_no,
-        m.vehicle_no,
-      ]
-        .filter(Boolean)
-        .map(normalizePlate);
-
-      if (candidates.length === 0) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No vehicle registration available" }));
-        return;
-      }
-
-      const foundDevice = devices.find((d: any) => {
-        const devPlate = normalizePlate(d.vehicle_no ?? d.vehicleNo ?? d.vehicle_no ?? d.vehicleNo);
-        return candidates.includes(devPlate);
-      });
-
-      if (!foundDevice) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No tracking device matched" }));
-        return;
-      }
-
-      // save mapping
-      manifestDeviceMapRef.current[m.id] = foundDevice;
-
-      if (!foundDevice.imei) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "Device found but IMEI missing" }));
-        return;
-      }
-
-      // temp loading state
-      setManifestLocations((prev) => ({ ...prev, [m.id]: "Loading location..." }));
-
-      // fetch latest
-      const latest = await getDeviceLatest(foundDevice.imei);
-      if (!latest) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No location returned" }));
-        return;
-      }
-
-      // reverse geocode
-      const address = await getLocationFromLatLon(latest.latitude, latest.longitude);
-
-      setManifestLocations((prev) => ({
-        ...prev,
-        [m.id]: {
-          latitude: latest.latitude,
-          longitude: latest.longitude,
-          timestamp: latest.timestamp,
-          address,
-          imei: foundDevice.imei,
-          deviceId: foundDevice.id,
-          raw: latest.raw,
-        },
-      }));
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
-
-  // Polling: refresh latest positions for unique IMEIs matched to today's manifests
+  /* ---------------- Reverse geocode students ---------------- */
   useEffect(() => {
     let cancelled = false;
-    const runPoll = async () => {
-      try {
-        // collect unique IMEIs from manifestDeviceMapRef
-        const imeis = Array.from(
-          new Set(
-            Object.values(manifestDeviceMapRef.current)
-              .filter(Boolean)
-              .map((d: any) => d.imei)
-              .filter(Boolean)
-          )
-        );
 
-        if (imeis.length === 0) return;
+    students.forEach(async (s: any) => {
+      const lat = toNum(s.latitude);
+      const lon = toNum(s.longitude);
+      if (lat === null || lon === null) return;
+      if (studentLocations[s.id]) return;
 
-        // fetch all latest concurrently
-        const results = await Promise.all(
-          imeis.map(async (imei) => {
-            const latest = await getDeviceLatest(imei);
-            return { imei, latest };
-          })
-        );
-
-        if (cancelled) return;
-
-        // Update each manifestLocations entry that maps to a given imei
-        const updates: Record<number, any> = {};
-        Object.entries(manifestDeviceMapRef.current).forEach(([manifestIdStr, device]) => {
-          const manifestId = Number(manifestIdStr);
-          const found = results.find((r) => r.imei === device.imei);
-          const entry = found?.latest;
-          if (!entry) return;
-          // reverse geocode if address changed or missing
-          (async () => {
-            const address =
-              manifestLocations[manifestId]?.address ||
-              (entry ? await getLocationFromLatLon(entry.latitude, entry.longitude) : "Unknown location");
-
-            updates[manifestId] = {
-              latitude: entry.latitude,
-              longitude: entry.longitude,
-              timestamp: entry.timestamp,
-              address,
-              imei: device.imei,
-              deviceId: device.id,
-              raw: entry.raw,
-            };
-
-            // push updates into state (batch)
-            setManifestLocations((prev) => ({ ...prev, ...updates }));
-          })();
-        });
-      } catch (err) {
-        console.error("Polling error", err);
+      const addr = await getLocationFromLatLon(lat, lon);
+      if (!cancelled) {
+        setStudentLocations((p) => ({ ...p, [s.id]: addr }));
       }
-    };
-
-    // initial run
-    runPoll();
-
-    const id = setInterval(() => {
-      runPoll();
-    }, POLL_INTERVAL_MS);
+    });
 
     return () => {
       cancelled = true;
-      clearInterval(id);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
+  }, [students]);
 
-  // ensure manifestLocations that have lat/lon but no address get reverse-geocoded
+  /* ---------------- Reverse geocode manifests ---------------- */
   useEffect(() => {
-    Object.entries(manifestLocations).forEach(async ([mid, val]) => {
-      if (typeof val === "object" && val.latitude && val.longitude && !val.address) {
-        const address = await getLocationFromLatLon(val.latitude, val.longitude);
-        setManifestLocations((prev) => ({ ...prev, [Number(mid)]: { ...val, address } }));
-      }
-    });
-  }, [manifestLocations]);
+    let cancelled = false;
 
-  // --- Filtered & paginated Students (unchanged) ---
+    (async () => {
+      const next: Record<number, any> = {};
+      for (const m of todaysManifests) {
+        const lat = toNum(m.latitude);
+        const lon = toNum(m.longitude);
+
+        if (lat === null || lon === null) {
+          next[m.id] = { address: "No GPS recorded", latitude: null, longitude: null };
+          continue;
+        }
+
+        const addr = await getLocationFromLatLon(lat, lon);
+        next[m.id] = {
+          latitude: lat,
+          longitude: lon,
+          address: addr,
+        };
+      }
+
+      if (!cancelled) setManifestLocations(next);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [todaysManifests]);
+
+  /* ---------------- Students Search ---------------- */
   const filteredStudents = useMemo(() => {
-    const search = studentSearch.toLowerCase();
+    const search = studentSearch.toLowerCase().trim();
     return students.filter((s: any) => {
-      const locationName = studentLocations[s.id] || "";
+      const loc = (studentLocations[s.id] || "").toLowerCase();
       return (
-        (s.name?.toLowerCase().includes(search)) ||
-        (s.grade?.toLowerCase().includes(search)) ||
-        (s.school?.name?.toLowerCase().includes(search)) ||
-        (s.bus?.name?.toLowerCase().includes(search)) ||
-        (s.parent?.user?.name?.toLowerCase().includes(search)) ||
-        (locationName.toLowerCase().includes(search))
+        String(s.name || "").toLowerCase().includes(search) ||
+        String(s.grade || "").toLowerCase().includes(search) ||
+        String(s.bus?.name || "").toLowerCase().includes(search) ||
+        loc.includes(search)
       );
     });
   }, [students, studentSearch, studentLocations]);
 
+  const totalStudentPages = Math.max(1, Math.ceil(filteredStudents.length / ROWS_PER_PAGE));
   const paginatedStudents = filteredStudents.slice(
-    (studentPage - 1) * rowsPerPage,
-    studentPage * rowsPerPage
+    (studentPage - 1) * ROWS_PER_PAGE,
+    studentPage * ROWS_PER_PAGE
   );
 
-  // --- Filtered & paginated Trips (uses manifestLocations for location text) ---
+  /* ---------------- Trips Search ---------------- */
   const filteredTrips = useMemo(() => {
-    const search = tripSearch.toLowerCase();
+    const search = tripSearch.toLowerCase().trim();
     return todaysManifests.filter((t: any) => {
-      const locObj = manifestLocations[t.id];
-      const loc = typeof locObj === "string" ? locObj : (locObj?.address || "");
-      const driverName = driversMap[t.bus?.driverId]?.name || "";
+      const loc = String(manifestLocations[t.id]?.address ?? "").toLowerCase();
+      const driverName =
+        t.bus?.driver?.name || driversMap[t.bus?.driverId]?.name || "";
+
       return (
-        (t.bus?.name?.toLowerCase().includes(search)) ||
-        (t.bus?.route?.toLowerCase().includes(search)) ||
-        (driverName.toLowerCase().includes(search)) ||
-        (t.assistant?.name?.toLowerCase().includes(search)) ||
-        (t.assistantName?.toLowerCase().includes(search)) ||
-        (t.session?.toLowerCase().includes(search)) ||
-        (t.status?.toLowerCase().includes(search)) ||
-        loc.toLowerCase().includes(search)
+        String(t.bus?.name || "").toLowerCase().includes(search) ||
+        String(driverName).toLowerCase().includes(search) ||
+        loc.includes(search)
       );
     });
   }, [todaysManifests, tripSearch, manifestLocations, driversMap]);
 
+  const totalTripPages = Math.max(1, Math.ceil(filteredTrips.length / ROWS_PER_PAGE));
   const paginatedTrips = filteredTrips.slice(
-    (tripPage - 1) * rowsPerPage,
-    tripPage * rowsPerPage
+    (tripPage - 1) * ROWS_PER_PAGE,
+    tripPage * ROWS_PER_PAGE
   );
 
+  const isLoading =
+    studentsQ.isLoading || busesQ.isLoading || manifestsQ.isLoading || usersQ.isLoading;
+
+  /* ---------------- UI ---------------- */
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-800">🚍 SchoolTrack Dashboard</h1>
-      <p className="text-gray-500">Welcome back! Overview of your school transport operations.</p>
+      <h1 className="text-2xl font-bold">🚍 SchoolTrack Dashboard</h1>
 
+      {/* STATS CARDS */}
       {isLoading ? (
         <div className="flex justify-center items-center h-40">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 w-full">
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <Card>
             <CardHeader className="flex justify-between pb-1">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Students</CardTitle>
-              <Users className="w-5 h-5 text-blue-600" />
+              <CardTitle className="text-sm text-muted-foreground">
+                Total Students
+              </CardTitle>
+              <Users className="w-5 h-5" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{students.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Enrolled across all buses</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{studentsCount}</div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+          <Card>
             <CardHeader className="flex justify-between pb-1">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Buses</CardTitle>
-              <Bus className="w-5 h-5 text-green-600" />
+              <CardTitle className="text-sm text-muted-foreground">
+                Total Buses
+              </CardTitle>
+              <Bus className="w-5 h-5" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{buses.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Active in your school fleet</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{busesCount}</div>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
+          <Card>
             <CardHeader className="flex justify-between pb-1">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Today's Trips</CardTitle>
-              <ClipboardList className="w-5 h-5 text-orange-600" />
+              <CardTitle className="text-sm text-muted-foreground">
+                Today's Trips
+              </CardTitle>
+              <ClipboardList className="w-5 h-5" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{todaysManifests.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Trip manifests recorded today</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{todaysTripsCount}</div>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Recent Students */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Recent Students</h2>
-        <input
-          type="text"
-          placeholder="Search students..."
-          value={studentSearch}
-          onChange={(e) => setStudentSearch(e.target.value)}
-          className="mb-2 p-2 border rounded w-1/2"
-        />
-        {paginatedStudents.length > 0 ? (
-          <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-gray-600 border-b">
-                <tr>
-                  <th className="py-2 px-3">#</th>
-                  <th className="py-2 px-3">Name</th>
-                  <th className="py-2 px-3">Grade</th>
-                  <th className="py-2 px-3">School</th>
-                  <th className="py-2 px-3">Bus</th>
-                  <th className="py-2 px-3">Parent</th>
-                  <th className="py-2 px-3">Home Location</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedStudents.map((s: any, idx: number) => (
-                  <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50 transition">
-                    <td className="py-2 px-3">{(studentPage - 1) * rowsPerPage + idx + 1}</td>
-                    <td className="py-2 px-3">{s.name}</td>
-                    <td className="py-2 px-3">{s.grade}</td>
-                    <td className="py-2 px-3">{s.school?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{s.bus?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{s.parent?.user?.name || "N/A"}</td>
-                    <td className="py-2 px-3">
-                      {studentLocations[s.id] ? studentLocations[s.id] : (
-                        <div className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* STUDENTS + TRIPS */}
+      <div className="grid md:grid-cols-2 gap-4">
+       {/* STUDENTS CARD */}
+<Card>
+  <CardHeader>
+    <CardTitle>Students</CardTitle>
+  </CardHeader>
 
-            {/* Pagination */}
-            <div className="mt-2 flex justify-end space-x-2">
-              {Array.from({ length: Math.ceil(filteredStudents.length / rowsPerPage) }, (_, i) => (
-                <button
-                  key={i}
-                  className={`px-3 py-1 rounded ${i + 1 === studentPage ? "bg-blue-600 text-white" : "bg-gray-200"}`}
-                  onClick={() => setStudentPage(i + 1)}
-                >
-                  {i + 1}
-                </button>
-              ))}
+  <CardContent className="space-y-4">
+    {/* Search */}
+    <input
+      type="text"
+      placeholder="Search by name, grade, bus..."
+      value={studentSearch}
+      onChange={(e) => {
+        setStudentSearch(e.target.value);
+        setStudentPage(1);
+      }}
+      className="w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+    />
+
+    {/* Results */}
+    <div className="space-y-2 max-h-64 overflow-y-auto">
+      {paginatedStudents.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          No students found
+        </div>
+      ) : (
+        paginatedStudents.map((s: any) => (
+          <div
+            key={s.id}
+            className="rounded-md border p-3 hover:bg-muted/40 transition"
+          >
+            <div className="font-medium text-sm">{s.name}</div>
+            <div className="text-xs text-muted-foreground">
+              Grade: {s.grade || "N/A"} • Bus: {s.bus?.name || "N/A"}
             </div>
           </div>
-        ) : (
-          <p className="text-sm text-gray-500">No student data available.</p>
-        )}
+        ))
+      )}
+    </div>
+
+    {/* Pagination */}
+    <div className="flex items-center justify-between text-xs">
+      <button
+        className="px-2 py-1 border rounded disabled:opacity-50"
+        disabled={studentPage <= 1}
+        onClick={() => setStudentPage((p) => Math.max(1, p - 1))}
+      >
+        Prev
+      </button>
+
+      <div>
+        Page {studentPage} / {totalStudentPages}
       </div>
 
-      {/* Today's Trip Activity */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Today's Trip Activity</h2>
-        <input
-          type="text"
-          placeholder="Search trips or locations..."
-          value={tripSearch}
-          onChange={(e) => setTripSearch(e.target.value)}
-          className="mb-2 p-2 border rounded w-full"
-        />
-        {paginatedTrips.length > 0 ? (
-          <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-gray-600 border-b">
-                <tr>
-                  <th className="py-2 px-3">#</th>
-                  <th className="py-2 px-3">Bus</th>
-                  <th className="py-2 px-3">Route</th>
-                  <th className="py-2 px-3">Driver</th>
-                  <th className="py-2 px-3">Assistant</th>
-                  <th className="py-2 px-3">Session</th>
-                  <th className="py-2 px-3">Status</th>
-                  <th className="py-2 px-3">Drop Off Location</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedTrips.map((trip: any, idx: number) => (
-                  <tr key={trip.id} className="border-b last:border-0 hover:bg-gray-50 transition">
-                    <td className="py-2 px-3">{(tripPage - 1) * rowsPerPage + idx + 1}</td>
-                    <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.bus?.route || "N/A"}</td>
-                    <td className="py-2 px-3">{driversMap[trip.bus?.driverId]?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.assistant?.name || trip.assistantName || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.session || "N/A"}</td>
-                    <td className="py-2 px-3">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          trip.status === "CHECKED_OUT"
-                            ? "bg-green-100 text-green-700"
-                            : trip.status === "CHECKED_IN"
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-gray-100 text-gray-600"
-                        }`}
-                      >
-                        {trip.status || "UNKNOWN"}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3">
-                      {manifestLocations[trip.id] ? (
-                        typeof manifestLocations[trip.id] === "string" ? (
-                          manifestLocations[trip.id]
-                        ) : (
-                          <>
-                            <div>{manifestLocations[trip.id].address || "Loading..."}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {manifestLocations[trip.id].imei ? `IMEI: ${manifestLocations[trip.id].imei}` : ""}
-                              {manifestLocations[trip.id].timestamp ? ` • ${new Date(manifestLocations[trip.id].timestamp).toLocaleString()}` : ""}
-                            </div>
-                          </>
-                        )
-                      ) : (
-                        <div className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading location...
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <button
+        className="px-2 py-1 border rounded disabled:opacity-50"
+        disabled={studentPage >= totalStudentPages}
+        onClick={() => setStudentPage((p) =>
+          Math.min(totalStudentPages, p + 1)
+        )}
+      >
+        Next
+      </button>
+    </div>
+  </CardContent>
+</Card>
 
-            {/* Pagination */}
-            <div className="mt-2 flex justify-end space-x-2">
-              {Array.from({ length: Math.ceil(filteredTrips.length / rowsPerPage) }, (_, i) => (
-                <button
-                  key={i}
-                  className={`px-3 py-1 rounded ${i + 1 === tripPage ? "bg-blue-600 text-white" : "bg-gray-200"}`}
-                  onClick={() => setTripPage(i + 1)}
-                >
-                  {i + 1}
-                </button>
-              ))}
+
+       {/* TODAY TRIPS CARD */}
+<Card>
+  <CardHeader>
+    <CardTitle>Today's Trips</CardTitle>
+  </CardHeader>
+
+  <CardContent className="space-y-4">
+    {/* Search */}
+    <input
+      type="text"
+      placeholder="Search by bus, driver, session, status..."
+      value={tripSearch}
+      onChange={(e) => {
+        setTripSearch(e.target.value);
+        setTripPage(1);
+      }}
+      className="w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+    />
+
+    {/* Results */}
+    <div className="space-y-2 max-h-64 overflow-y-auto">
+      {paginatedTrips.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          No trips found
+        </div>
+      ) : (
+        paginatedTrips.map((t: any) => {
+          const driverName =
+            t.bus?.driver?.name ||
+            driversMap?.[t.bus?.driverId]?.name ||
+            "N/A";
+
+          return (
+            <div
+              key={t.id}
+              className="rounded-md border p-3 hover:bg-muted/40 transition"
+            >
+              <div className="font-medium text-sm">
+                {t.bus?.name || `Bus ${t.busId || "N/A"}`}
+              </div>
+
+              <div className="text-xs text-muted-foreground mt-1">
+                Driver: {driverName} • Session: {t.session || "N/A"} • Status:{" "}
+                {t.status || "N/A"}
+              </div>
+
+              <div className="text-xs text-muted-foreground mt-1">
+                Location: {manifestLocations?.[t.id]?.address || "Loading..."}
+              </div>
             </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">No trips today.</p>
-        )}
+          );
+        })
+      )}
+    </div>
+
+    {/* Pagination */}
+    <div className="flex items-center justify-between text-xs">
+      <button
+        className="px-2 py-1 border rounded disabled:opacity-50"
+        disabled={tripPage <= 1}
+        onClick={() => setTripPage((p) => Math.max(1, p - 1))}
+      >
+        Prev
+      </button>
+
+      <div>
+        Page {tripPage} / {totalTripPages}
       </div>
 
-      {/* Map View */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Trip Locations Map</h2>
-        <MapContainer
-          center={[-1.04544, 37.09609]}
-          zoom={12}
-          style={{ height: "400px", width: "100%" }}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          {todaysManifests.map((m: any) => {
-            // prefer resolved manifestLocations map entry
-            const resolved = manifestLocations[m.id];
-            let lat: number | undefined;
-            let lon: number | undefined;
-            let popupAddress = "";
+      <button
+        className="px-2 py-1 border rounded disabled:opacity-50"
+        disabled={tripPage >= totalTripPages}
+        onClick={() => setTripPage((p) => Math.min(totalTripPages, p + 1))}
+      >
+        Next
+      </button>
+    </div>
+  </CardContent>
+</Card>
 
-            if (typeof resolved === "object" && resolved?.latitude && resolved?.longitude) {
-              lat = resolved.latitude;
-              lon = resolved.longitude;
-              popupAddress = resolved.address || "";
-            } else {
-              // fallback to existing manifest/bus coordinates if any
-              const candidateLat = m.latitude ?? m.bus?.latitude;
-              const candidateLon = m.longitude ?? m.bus?.longitude;
-              if (candidateLat && candidateLon) {
-                lat = candidateLat;
-                lon = candidateLon;
-                popupAddress = typeof resolved === "string" ? resolved : "";
-              }
-            }
-
-            if (!lat || !lon) return null;
-
-            // Create vehicle-like object for icon creation
-            const vehicleData = {
-              lat,
-              lng: lon,
-              plateNumber: m.bus?.plateNumber || m.bus?.registration || m.bus?.name || "N/A",
-              movementState: m.status === "CHECKED_IN" ? "moving" : "standing",
-              direction: 0,
-            };
-
-            return (
-              <Marker key={m.id} position={[lat, lon]} icon={createBusIcon(vehicleData, false)}>
-                <Popup>
-                  <strong>Bus:</strong> {m.bus?.name || "N/A"} <br />
-                  <strong>Driver:</strong> {driversMap[m.bus?.driverId]?.name || "N/A"} <br />
-                  <strong>Assistant:</strong> {m.assistant?.name || "N/A"} <br />
-                  <strong>Status:</strong> {m.status || "N/A"} <br />
-                  <strong>Session:</strong> {m.session || "N/A"} <br />
-                  <strong>Drop Off:</strong> {popupAddress || "Loading..."}
-                </Popup>
-              </Marker>
-            );
-          })}
-        </MapContainer>
       </div>
+
+      {/* MAP BELOW */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Trip Locations Map</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MapContainer
+            center={[-1.286389, 36.817223]}
+            zoom={12}
+            style={{ height: "400px", width: "100%" }}
+          >
+            <TileLayer
+              attribution="© OpenStreetMap"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {todaysManifests.map((m: any) => {
+              const loc = manifestLocations[m.id];
+              const lat = toNum(loc?.latitude);
+              const lon = toNum(loc?.longitude);
+              if (lat === null || lon === null) return null;
+
+              return (
+                <Marker
+                  key={m.id}
+                  position={[lat, lon]}
+                  icon={createBusIcon(
+                    {
+                      lat,
+                      lng: lon,
+                      plateNumber: m.bus?.name,
+                      movementState: "moving",
+                      direction: 0,
+                    },
+                    false
+                  )}
+                >
+                  <Popup>{loc?.address}</Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        </CardContent>
+      </Card>
     </div>
   );
 }
