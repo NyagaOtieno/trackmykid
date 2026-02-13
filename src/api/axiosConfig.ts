@@ -1,45 +1,25 @@
+// src/api/axiosConfig.ts
 import axios, { AxiosError } from "axios";
-import { getToken, clearSession } from "@/lib/auth"; // ✅
+import { getToken, clearSession } from "@/lib/auth";
 
+/* =========================
+   Base Axios instance
+========================= */
 const BASE_URL =
   import.meta.env.VITE_API_URL?.trim() ||
   "https://schooltransport-production.up.railway.app/api";
 
-const api = axios.create({
-  baseURL: BASE_URL.replace(/\/+$/, ""),
+// Ensure no trailing slash
+const baseURL = BASE_URL.replace(/\/+$/, "");
+
+export const api = axios.create({
+  baseURL,
   headers: { "Content-Type": "application/json" },
   withCredentials: false,
 });
 
-api.interceptors.request.use(
-  (config) => {
-    const token = getToken(); // ✅ always authToken/token
-    config.headers = config.headers ?? {};
-
-    if (token) (config.headers as any).Authorization = `Bearer ${token}`;
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    const status = err?.response?.status;
-    if (status === 401) {
-      // token missing/expired
-      clearSession();
-      window.location.href = "/login";
-    }
-    return Promise.reject(err);
-  }
-);
-
-
-
-
 /* =========================
-   Error normalization
+   Error type + normalizer
 ========================= */
 export type ApiError = {
   status?: number;
@@ -62,37 +42,133 @@ function normalizeError(err: unknown): ApiError {
   };
 }
 
+/* =========================
+   Request interceptor: Bearer token
+========================= */
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken(); // authToken || token
+    config.headers = config.headers ?? {};
+
+    if (token) {
+      (config.headers as any).Authorization = `Bearer ${token}`;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+/* =========================
+   Response interceptor:
+   - auto logout on 401
+   - normalize error once
+========================= */
 api.interceptors.response.use(
   (res) => res,
-  (err) => Promise.reject(normalizeError(err))
+  (err) => {
+    const status = err?.response?.status;
+
+    if (status === 401) {
+      clearSession();
+      const next = encodeURIComponent(
+        window.location.pathname + window.location.search
+      );
+      window.location.href = `/login?next=${next}`;
+    }
+
+    return Promise.reject(normalizeError(err));
+  }
 );
+
+/* =========================
+   Helpers: unwrap backend shapes
+   - supports: Array
+   - supports: { success, data, count }
+========================= */
+function unwrap<T = any>(resData: any): T {
+  if (Array.isArray(resData)) return resData as T;
+  if (resData && typeof resData === "object" && "data" in resData)
+    return resData.data as T;
+  return resData as T;
+}
 
 /* =========================
    Generic helpers
 ========================= */
-export const apiGet = async <T = any>(path: string) => (await api.get<T>(path)).data;
-export const apiPost = async <T = any>(path: string, body?: any) => (await api.post<T>(path, body)).data;
-export const apiPut = async <T = any>(path: string, body?: any) => (await api.put<T>(path, body)).data;
-export const apiDelete = async <T = any>(path: string) => (await api.delete<T>(path)).data;
+export async function apiGet<T = any>(path: string): Promise<T> {
+  const res = await api.get(path);
+  return unwrap<T>(res.data);
+}
+
+export async function apiPost<T = any>(path: string, body?: any): Promise<T> {
+  const res = await api.post(path, body);
+  return unwrap<T>(res.data);
+}
+
+export async function apiPut<T = any>(path: string, body?: any): Promise<T> {
+  const res = await api.put(path, body);
+  return unwrap<T>(res.data);
+}
+
+export async function apiDelete<T = any>(path: string): Promise<T> {
+  const res = await api.delete(path);
+  return unwrap<T>(res.data);
+}
 
 /* =========================
-   Domain API exports (what your pages import)
-   NOTE: baseURL already ends with /api, so DO NOT prefix /api here
+   Domain API exports
+   NOTE: baseURL already ends with /api
 ========================= */
-export const getStudents = () => apiGet("/students");
-export const getUsers = () => apiGet("/users");
-export const getBuses = () => apiGet("/buses");
-export const getManifests = () => apiGet("/manifests");
 
-export const deleteBus = (busId: number | string) => apiDelete(`/buses/${busId}`);
-export const deleteUser = (userId: number | string) => apiDelete(`/users/${userId}`);
+// --- Students / Manifests / Buses / Users ---
+export const getStudents = () => apiGet<any[]>("/students");
+export const getManifests = () => apiGet<any[]>("/manifests");
 
-// If assistants are users with role ASSISTANT:
+export const getBuses = () => apiGet<any[]>("/buses");
+export const createBus = (body: any) => apiPost("/buses", body);
+export const updateBus = (id: number | string, body: any) =>
+  apiPut(`/buses/${id}`, body);
+export const deleteBus = (id: number | string) => apiDelete(`/buses/${id}`);
+
+export const getUsers = () => apiGet<any[]>("/users");
+export const updateUser = (id: number | string, body: any) =>
+  apiPut(`/users/${id}`, body);
+export const deleteUser = (id: number | string) => apiDelete(`/users/${id}`);
+
+// --- Role based helpers (Drivers / Assistants / Parents) ---
+export const getDrivers = async () => {
+  const users = await getUsers();
+  return (users || []).filter(
+    (u: any) => String(u.role || "").toUpperCase() === "DRIVER"
+  );
+};
+
+export const getAssistants = async () => {
+  const users = await getUsers();
+  return (users || []).filter(
+    (u: any) => String(u.role || "").toUpperCase() === "ASSISTANT"
+  );
+};
+
+export const getParents = async () => {
+  const users = await getUsers();
+  return (users || []).filter(
+    (u: any) => String(u.role || "").toUpperCase() === "PARENT"
+  );
+};
+
+// --- Create users by role ---
+export const createUser = (body: any) => apiPost("/users", body);
+
+export const createDriver = (body: any) => createUser({ ...body, role: "DRIVER" });
+
 export const createAssistant = (body: any) =>
-  apiPost("/users", { ...body, role: "ASSISTANT" });
+  createUser({ ...body, role: "ASSISTANT" });
 
-// Schools vs tenants: pick the one your backend actually has.
-// If you previously used /tenants/me, you might have /tenants not /schools.
-export const getSchools = () => apiGet("/schools"); // change to "/tenants" if needed
+export const createParent = (body: any) => createUser({ ...body, role: "PARENT" });
+
+// --- Schools / Tenants ---
+export const getSchools = () => apiGet<any[]>("/schools"); // change if backend uses /tenants
 
 export default api;

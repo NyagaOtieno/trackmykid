@@ -36,8 +36,15 @@ export function clearSession() {
 }
 
 export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem("token") || "";
+  const t =
+    localStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem("token") ||
+    "";
+
+  // remove accidental wrapping quotes
+  return t.replace(/^"+|"+$/g, "").trim();
 }
+
 
 export function getCurrentUser(): User | null {
   const raw = localStorage.getItem(USER_KEY);
