@@ -12,7 +12,7 @@ import {
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from "react-leaflet";
 import {
   Card,
   CardContent,
@@ -336,10 +336,16 @@ function VehicleDetailsCard({
           </CardHeader>
         )}
 
-        <CardContent className={`p-2 sm:p-3 lg:p-6 space-y-2 sm:space-y-3 lg:space-y-4 ${variant === "sheet" ? "pt-3" : ""}`}>
+        <CardContent
+          className={`p-2 sm:p-3 lg:p-6 space-y-2 sm:space-y-3 lg:space-y-4 ${
+            variant === "sheet" ? "pt-3" : ""
+          }`}
+        >
           {variant === "full" && (
             <div className="space-y-2">
-              <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Vehicle Information</h3>
+              <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">
+                Vehicle Information
+              </h3>
 
               {vehicle.busName && vehicle.busName !== "No Bus Assigned" && (
                 <div className="flex items-center gap-2">
@@ -360,7 +366,9 @@ function VehicleDetailsCard({
                   </div>
                   <div>
                     <p className="text-[10px] text-muted-foreground">Plate Number</p>
-                    <p className="font-medium text-sm sm:text-base">{vehicle.plateNumber}</p>
+                    <p className="font-medium text-sm sm:text-base">
+                      {vehicle.plateNumber}
+                    </p>
                   </div>
                 </div>
               )}
@@ -440,12 +448,19 @@ function VehicleDetailsCard({
 
           {vehicleStudents.length > 0 && (
             <div className="space-y-1.5 pt-2 border-t">
-              <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Students on Vehicle</h3>
+              <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">
+                Students on Vehicle
+              </h3>
               <div className="space-y-1">
                 {vehicleStudents.map((sv) => (
-                  <div key={sv.student.id} className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded">
+                  <div
+                    key={sv.student.id}
+                    className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded"
+                  >
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{sv.student.name}</p>
+                      <p className="font-medium text-xs sm:text-sm truncate">
+                        {sv.student.name}
+                      </p>
                       <p className="text-[10px] text-muted-foreground">
                         {sv.status === "CHECKED_IN"
                           ? "On Board"
@@ -487,7 +502,8 @@ function VehicleDetailsCard({
               <span>Emergency Notification Alert</span>
             </DialogTitle>
             <DialogDescription className="text-sm sm:text-base mt-2 text-left">
-              Please select a reason for this emergency alert. Help will be notified immediately.
+              Please select a reason for this emergency alert. Help will be notified
+              immediately.
             </DialogDescription>
           </DialogHeader>
 
@@ -496,14 +512,20 @@ function VehicleDetailsCard({
               <SelectTrigger className="w-full h-11 sm:h-10 text-base sm:text-sm">
                 <SelectValue placeholder="Select a reason" />
               </SelectTrigger>
-              <SelectContent className="max-h-[60vh] sm:max-h-[200px] !z-[10001]" position="popper">
+              <SelectContent
+                className="max-h-[60vh] sm:max-h-[200px] !z-[10001]"
+                position="popper"
+              >
                 <SelectItem value="Emergency" className="text-base sm:text-sm py-3 sm:py-2">
                   Emergency
                 </SelectItem>
                 <SelectItem value="Accident" className="text-base sm:text-sm py-3 sm:py-2">
                   Accident
                 </SelectItem>
-                <SelectItem value="Medical Issue" className="text-base sm:text-sm py-3 sm:py-2">
+                <SelectItem
+                  value="Medical Issue"
+                  className="text-base sm:text-sm py-3 sm:py-2"
+                >
                   Medical Issue
                 </SelectItem>
                 <SelectItem value="Other" className="text-base sm:text-sm py-3 sm:py-2">
@@ -754,18 +776,54 @@ export default function ParentPortal() {
     return Array.from(map.values());
   }, [studentViews]);
 
-  const selectedVehicle = useMemo(() => {
-    if (!selectedStudentId) return null;
-    const selectedStudent = studentViews.find((sv) => sv.student.id === selectedStudentId);
-    if (!selectedStudent) return null;
-    return vehiclesByPlate.find((v) => v.plateNumber === selectedStudent.plate) || null;
-  }, [selectedStudentId, studentViews, vehiclesByPlate]);
+  /* ---------------- NEW: only show vehicles that have at least one CHECKED_IN student (showOnMap=true) ---------------- */
+  const visibleVehiclesByPlate = useMemo(() => {
+    return vehiclesByPlate.filter((v) => v.students.some((s) => s.showOnMap));
+  }, [vehiclesByPlate]);
 
   const selectedStudentView = useMemo(() => {
-    return studentViews.find((sv) => sv.student.id === selectedStudentId) ?? studentViews[0] ?? null;
+    return (
+      studentViews.find((sv) => sv.student.id === selectedStudentId) ??
+      studentViews[0] ??
+      null
+    );
   }, [selectedStudentId, studentViews]);
 
-  const vehicleMarkers = vehiclesByPlate.filter(
+  /* ---------------- NEW: hide selected vehicle if the selected child is CHECKED_OUT ---------------- */
+  const selectedVehicle = useMemo(() => {
+    if (!selectedStudentId) return null;
+
+    const selectedStudent = studentViews.find((sv) => sv.student.id === selectedStudentId);
+    if (!selectedStudent) return null;
+
+    // If selected child is checked out, hide bus/details
+    if (selectedStudent.status === "CHECKED_OUT") return null;
+
+    // Only choose from visible vehicles (means at least one child is CHECKED_IN)
+    return visibleVehiclesByPlate.find((v) => v.plateNumber === selectedStudent.plate) || null;
+  }, [selectedStudentId, studentViews, visibleVehiclesByPlate]);
+
+  /* ---------------- NEW: Polyline trail for selected child using manifest lat/lon ---------------- */
+  const selectedTrail = useMemo(() => {
+    if (!selectedStudentView) return [];
+    if (selectedStudentView.status === "CHECKED_OUT") return [];
+
+    const sid = selectedStudentView.student.id;
+
+    const pts = manifests
+      .filter((m) => Number(m.studentId ?? m.student?.id) === Number(sid))
+      .filter((m) => m.latitude != null && m.longitude != null)
+      .sort(
+        (a, b) =>
+          new Date(a.date ?? 0).getTime() - new Date(b.date ?? 0).getTime()
+      )
+      .slice(-80) // last 80 points
+      .map((m) => [Number(m.latitude), Number(m.longitude)] as [number, number]);
+
+    return pts;
+  }, [manifests, selectedStudentView]);
+
+  const vehicleMarkers = visibleVehiclesByPlate.filter(
     (v) =>
       v.lat != null &&
       v.lng != null &&
@@ -792,7 +850,8 @@ export default function ParentPortal() {
   };
 
   const mobileMovementState = selectedVehicle?.movementState?.toLowerCase() || "unknown";
-  const mobileIsMoving = mobileMovementState === "moving" || mobileMovementState === "driving";
+  const mobileIsMoving =
+    mobileMovementState === "moving" || mobileMovementState === "driving";
 
   return (
     <div className="min-h-screen bg-muted/30 flex flex-col">
@@ -803,14 +862,20 @@ export default function ParentPortal() {
               <Car className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg sm:text-xl font-bold text-foreground">Parent Portal</h1>
-              <p className="text-[11px] sm:text-xs text-muted-foreground">Live tracking & updates</p>
+              <h1 className="text-lg sm:text-xl font-bold text-foreground">
+                Parent Portal
+              </h1>
+              <p className="text-[11px] sm:text-xs text-muted-foreground">
+                Live tracking & updates
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden sm:flex flex-col items-end leading-tight">
-              <span className="text-sm font-semibold text-foreground">{currentUser?.name ?? "Parent"}</span>
+              <span className="text-sm font-semibold text-foreground">
+                {currentUser?.name ?? "Parent"}
+              </span>
               <span className="text-[11px] text-muted-foreground">Welcome back</span>
             </div>
 
@@ -902,6 +967,9 @@ export default function ParentPortal() {
                 <FitBounds bounds={vehicleBounds} />
                 <FlyToLocation selectedVehicle={selectedVehicle || undefined} />
 
+                {/* NEW: Polyline visible (trail for selected student, if points exist) */}
+                {selectedTrail.length >= 2 && <Polyline positions={selectedTrail} />}
+
                 {vehicleMarkers.map((vehicle) => {
                   const isSelected = selectedVehicle?.plateNumber === vehicle.plateNumber;
                   const movementState = vehicle.movementState?.toLowerCase() || "unknown";
@@ -946,7 +1014,11 @@ export default function ParentPortal() {
                                 isMoving ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
                               }`}
                             >
-                              <span className={`h-2 w-2 rounded-full ${isMoving ? "bg-green-500" : "bg-amber-500"}`} />
+                              <span
+                                className={`h-2 w-2 rounded-full ${
+                                  isMoving ? "bg-green-500" : "bg-amber-500"
+                                }`}
+                              />
                               {isMoving ? "Moving" : "Stopped"}
                             </span>
                           </div>
@@ -958,7 +1030,9 @@ export default function ParentPortal() {
                           {vehicle.students.length > 0 && (
                             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                               <span>Students</span>
-                              <span className="font-semibold text-foreground">{vehicle.students.length}</span>
+                              <span className="font-semibold text-foreground">
+                                {vehicle.students.length}
+                              </span>
                             </div>
                           )}
                         </div>
@@ -987,9 +1061,13 @@ export default function ParentPortal() {
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <CardTitle className="text-base truncate">{selectedStudentView.student.name}</CardTitle>
+                        <CardTitle className="text-base truncate">
+                          {selectedStudentView.student.name}
+                        </CardTitle>
                         <CardDescription className="text-xs">
-                          {selectedStudentView.student.grade ?? selectedStudentView.student.className ?? "Grade N/A"}
+                          {selectedStudentView.student.grade ??
+                            selectedStudentView.student.className ??
+                            "Grade N/A"}
                         </CardDescription>
                       </div>
                       <Badge
@@ -1024,13 +1102,17 @@ export default function ParentPortal() {
                       <div>
                         <p className="text-muted-foreground">Boarding</p>
                         <p className="font-medium">
-                          {selectedStudentView.manifest?.boardingTime ? fmt(selectedStudentView.manifest?.boardingTime) : "—"}
+                          {selectedStudentView.manifest?.boardingTime
+                            ? fmt(selectedStudentView.manifest?.boardingTime)
+                            : "—"}
                         </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Alighting</p>
                         <p className="font-medium">
-                          {selectedStudentView.manifest?.alightingTime ? fmt(selectedStudentView.manifest?.alightingTime) : "—"}
+                          {selectedStudentView.manifest?.alightingTime
+                            ? fmt(selectedStudentView.manifest?.alightingTime)
+                            : "—"}
                         </p>
                       </div>
                     </div>
@@ -1045,12 +1127,20 @@ export default function ParentPortal() {
 
             <div>
               <h3 className="text-sm font-semibold mb-2 text-foreground">Vehicle Details</h3>
-              <VehicleDetailsCard vehicle={selectedVehicle} students={studentViews} parentId={parentUserId} variant="full" />
+
+              {/* NOTE: selectedVehicle is null when selected child is CHECKED_OUT */}
+              <VehicleDetailsCard
+                vehicle={selectedVehicle}
+                students={studentViews}
+                parentId={parentUserId}
+                variant="full"
+              />
             </div>
           </div>
         </aside>
 
         {/* Mobile bottom sheet */}
+        {/* NOTE: selectedVehicle is null when selected child is CHECKED_OUT, so this will not render */}
         {selectedVehicle && (
           <aside
             className={`fixed bottom-0 left-0 right-0 bg-muted/70 backdrop-blur-sm border-t shadow-2xl z-50 lg:hidden transition-all duration-300 ${
@@ -1060,13 +1150,19 @@ export default function ParentPortal() {
             <div className="sticky top-0 bg-card px-3 py-2.5 flex items-center gap-3 border-b z-10">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-foreground truncate">{selectedVehicle.busName}</h2>
+                  <h2 className="text-sm font-semibold text-foreground truncate">
+                    {selectedVehicle.busName}
+                  </h2>
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
                       mobileIsMoving ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
                     }`}
                   >
-                    <span className={`h-2 w-2 rounded-full ${mobileIsMoving ? "bg-green-500" : "bg-amber-500"}`} />
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        mobileIsMoving ? "bg-green-500" : "bg-amber-500"
+                      }`}
+                    />
                     {mobileIsMoving ? "Moving" : "Stopped"}
                   </span>
                 </div>
@@ -1091,7 +1187,11 @@ export default function ParentPortal() {
                 className="p-2 rounded-full hover:bg-muted transition-colors shrink-0"
                 aria-label={showMobileDetails ? "Collapse details" : "Expand details"}
               >
-                {showMobileDetails ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                {showMobileDetails ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
               </button>
             </div>
 
@@ -1106,9 +1206,13 @@ export default function ParentPortal() {
                     <CardHeader className="pb-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <CardTitle className="text-sm font-semibold truncate">{selectedStudentView.student.name}</CardTitle>
+                          <CardTitle className="text-sm font-semibold truncate">
+                            {selectedStudentView.student.name}
+                          </CardTitle>
                           <CardDescription className="text-xs">
-                            {selectedStudentView.student.grade ?? selectedStudentView.student.className ?? "Grade N/A"}
+                            {selectedStudentView.student.grade ??
+                              selectedStudentView.student.className ??
+                              "Grade N/A"}
                           </CardDescription>
                         </div>
                         <Badge
@@ -1132,11 +1236,15 @@ export default function ParentPortal() {
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <p className="text-muted-foreground">Route / Bus</p>
-                          <p className="font-medium text-foreground truncate">{selectedStudentView.busName}</p>
+                          <p className="font-medium text-foreground truncate">
+                            {selectedStudentView.busName}
+                          </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Plate</p>
-                          <p className="font-medium text-foreground truncate">{selectedStudentView.plate}</p>
+                          <p className="font-medium text-foreground truncate">
+                            {selectedStudentView.plate}
+                          </p>
                         </div>
                       </div>
 
@@ -1144,13 +1252,17 @@ export default function ParentPortal() {
                         <div>
                           <p className="text-muted-foreground">Boarding</p>
                           <p className="font-medium">
-                            {selectedStudentView.manifest?.boardingTime ? fmt(selectedStudentView.manifest?.boardingTime) : "—"}
+                            {selectedStudentView.manifest?.boardingTime
+                              ? fmt(selectedStudentView.manifest?.boardingTime)
+                              : "—"}
                           </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Alighting</p>
                           <p className="font-medium">
-                            {selectedStudentView.manifest?.alightingTime ? fmt(selectedStudentView.manifest?.alightingTime) : "—"}
+                            {selectedStudentView.manifest?.alightingTime
+                              ? fmt(selectedStudentView.manifest?.alightingTime)
+                              : "—"}
                           </p>
                         </div>
                       </div>
