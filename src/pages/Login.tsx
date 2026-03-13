@@ -1,232 +1,263 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import api from "@/api/axiosConfig";
 import { Eye, EyeOff } from "lucide-react";
+import api from "@/api/axiosConfig";
+import { clearSession, getSession, saveSession } from "@/lib/auth";
 
-// ✅ Backend endpoints (baseURL already handled by api)
-const AUTH_URL = "/auth/login";
-const FORGOT_URL = "/auth/forgot-password";
+type Step = "login" | "forgotPhone" | "resetPassword";
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
+  const didInit = useRef(false);
+  const otpTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [step, setStep] = useState<Step>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+
   const [showPassword, setShowPassword] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // ✅ Redirect if already authenticated
+  const [phone, setPhone] = useState("");
+  const [otp, setOTP] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [otpSent, setOTPSent] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
+
+  const canLogin = useMemo(
+    () => email.trim().length > 0 && password.trim().length > 0,
+    [email, password]
+  );
+
+  // ✅ If already logged in, go resolve mode -> correct UI
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    const isAuthenticated = localStorage.getItem("isAuthenticated") === "true";
+    if (didInit.current) return;
+    didInit.current = true;
 
-    if (token && isAuthenticated) {
-      // Only redirect based on role
-      switch (user.role) {
-        case "ADMIN":
-          navigate("/dashboard");
-          break;
-        case "PARENT":
-          navigate("/parent-portal");
-          break;
-        case "DRIVER":
-          navigate("/driver-portal");
-          break;
-        case "ASSISTANT":
-          navigate("/assistant-portal");
-          break;
-        default:
-          localStorage.clear();
-          navigate("/");
-      }
+    const session = getSession();
+    if (session?.user?.role) {
+      navigate("/resolve", { replace: true });
     }
   }, [navigate]);
 
+  useEffect(() => {
+    return () => {
+      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!canLogin) return;
+
+  setIsLoading(true);
+  try {
+    const response = await api.post("/auth/login", { email, password });
+
+    // ✅ token can be in body OR headers depending on backend
+    const data = response.data || {};
+
+    const token =
+      data.token ||
+      data.accessToken ||
+      data?.data?.token ||
+      data?.data?.accessToken ||
+      response.headers?.authorization?.replace(/^Bearer\s+/i, "") ||
+      response.headers?.["x-access-token"] ||
+      response.headers?.["x-auth-token"];
+
+    // ✅ user might be in body as "user" or directly returned object
+    const user = data.user || data?.data?.user || (data?.id ? data : null);
+
+    if (!token) {
+      // show what we got (helps debugging)
+      console.error("Login response has no token:", { data, headers: response.headers });
+      throw new Error("Login succeeded but no token was returned by the API.");
+    }
+
+    if (!user) throw new Error("Login response missing user object.");
+
+    saveSession(String(token), user);
+
+    toast.success(`Welcome back, ${user?.name || "User"}!`);
+
+    const from = (location.state as any)?.from as string | undefined;
+    navigate("/resolve", { replace: true, state: { from } });
+  } catch (err: any) {
+    clearSession();
+    toast.error(err?.message || err?.response?.data?.message || "Login failed");
+  } finally {
+    setIsLoading(false);
+  }
+};
+
+
+  const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!phone.trim()) return toast.error("Enter phone number");
+
     setIsLoading(true);
-
     try {
-      // 🚀 Login via api instance
-      const response = await api.post(AUTH_URL, { email, password });
-      const { token, user } = response.data || {};
+      const res = await api.post("/auth/forgot-password", { phone });
+      if (!res.data?.success) return toast.error(res.data?.message || "Failed to send OTP");
 
-      if (!token || !user) {
-        throw new Error("Invalid login response from server");
-      }
+      toast.success(res.data.message || "OTP sent");
+      setStep("resetPassword");
+      setOTPSent(true);
+      setResendTimer(600);
 
-      // ✅ Save session
-      localStorage.setItem("token", token);
-      localStorage.setItem("user", JSON.stringify(user));
-      localStorage.setItem("isAuthenticated", "true");
-
-      toast.success(`Welcome back, ${user.name || "User"}!`);
-
-      // ✅ Redirect based on role
-      switch (user.role) {
-        case "PARENT":
-          navigate("/parent-portal");
-          break;
-        case "DRIVER":
-          navigate("/driver-portal");
-          break;
-        case "ASSISTANT":
-          navigate("/assistant-portal");
-          break;
-        case "ADMIN":
-          navigate("/dashboard"); // Only admin can access /dashboard
-          break;
-        default:
-          // Block non-admin from dashboard
-          toast.error("You are not authorized to access the admin dashboard.");
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          localStorage.removeItem("isAuthenticated");
-          navigate("/"); // Redirect to home/login
-      }
-    } catch (error: any) {
-      console.error("Login error:", error);
-      localStorage.removeItem("token");
-      localStorage.removeItem("isAuthenticated");
-      localStorage.removeItem("user");
-      toast.error(
-        error.response?.data?.message || "Login failed. Check your credentials."
-      );
+      if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+      otpTimerRef.current = setInterval(() => {
+        setResendTimer((prev) => {
+          if (prev <= 1) {
+            if (otpTimerRef.current) clearInterval(otpTimerRef.current);
+            setOTPSent(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch {
+      toast.error("Network error. Try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!forgotEmail) {
-      toast.error("Please enter your email.");
-      return;
-    }
+
+    if (!otp.trim()) return toast.error("Enter OTP");
+    if (!newPassword.trim()) return toast.error("Enter new password");
+    if (newPassword !== confirmPassword) return toast.error("Passwords do not match");
+
+    setIsLoading(true);
     try {
-      await api.post(FORGOT_URL, { email: forgotEmail });
-      toast.success("Password reset link sent to your email.");
-      setIsForgotOpen(false);
-    } catch (error: any) {
-      toast.error(
-        error.response?.data?.message || "Failed to send reset link."
-      );
+      const res = await api.post("/auth/reset-password", { phone, otp, newPassword });
+      if (!res.data?.success) return toast.error(res.data?.message || "Reset failed");
+
+      toast.success("Password reset successful");
+      setStep("login");
+      setPhone("");
+      setOTP("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch {
+      toast.error("Network error. Try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">
-            🎓 SchoolTrack Transport
-          </CardTitle>
-          <CardDescription className="text-center">
-            Enter your credentials to access the system
-          </CardDescription>
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold text-center">Track Anywhere</CardTitle>
+          <CardDescription className="text-center">Sign in to continue</CardDescription>
         </CardHeader>
 
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
-              </label>
+          {step === "login" && (
+            <form onSubmit={handleSubmit} className="space-y-4">
               <Input
-                id="email"
                 type="email"
-                placeholder="your@email.com"
+                placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                disabled={isLoading}
               />
-            </div>
 
-            <div className="space-y-2 relative">
-              <label htmlFor="password" className="text-sm font-medium">
-                Password
-              </label>
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-8 text-gray-500"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-
-            <div className="text-right">
-              <button
-                type="button"
-                className="text-sm text-blue-600 hover:underline"
-                onClick={() => setIsForgotOpen(true)}
-              >
-                Forgot Password?
-              </button>
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
-
-          {/* Forgot Password Modal */}
-          {isForgotOpen && (
-            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 shadow-lg w-[90%] max-w-sm">
-                <h2 className="text-lg font-semibold mb-2 text-center">
-                  Reset Password
-                </h2>
-                <p className="text-sm text-gray-500 mb-4 text-center">
-                  Enter your email to receive a password reset link.
-                </p>
-                <form onSubmit={handleForgotPassword} className="space-y-3">
-                  <Input
-                    type="email"
-                    placeholder="Enter your email"
-                    value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
-                    required
-                  />
-                  <div className="flex gap-2">
-                    <Button type="submit" className="w-full">
-                      Send Link
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setIsForgotOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  className="absolute right-3 top-2.5 text-gray-500"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
-            </div>
+
+              <div className="text-right">
+                <button
+                  type="button"
+                  className="text-sm text-blue-600"
+                  onClick={() => setStep("forgotPhone")}
+                >
+                  Forgot password?
+                </button>
+              </div>
+
+              <Button className="w-full" disabled={isLoading || !canLogin}>
+                {isLoading ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          )}
+
+          {step === "forgotPhone" && (
+            <form onSubmit={handleSendOTP} className="space-y-3">
+              <Input
+                placeholder="Phone number"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                required
+              />
+              <Button className="w-full" disabled={isLoading || otpSent}>
+                {otpSent ? `Resend in ${resendTimer}s` : "Send OTP"}
+              </Button>
+
+              <button
+                type="button"
+                className="w-full text-sm text-muted-foreground"
+                onClick={() => setStep("login")}
+              >
+                Back to login
+              </button>
+            </form>
+          )}
+
+          {step === "resetPassword" && (
+            <form onSubmit={handleResetPassword} className="space-y-3">
+              <Input placeholder="OTP" value={otp} onChange={(e) => setOTP(e.target.value)} />
+              <Input
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <Input
+                type="password"
+                placeholder="Confirm password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+
+              <Button className="w-full" disabled={isLoading}>
+                {isLoading ? "Resetting..." : "Reset password"}
+              </Button>
+
+              <button
+                type="button"
+                className="w-full text-sm text-muted-foreground"
+                onClick={() => setStep("login")}
+              >
+                Back to login
+              </button>
+            </form>
           )}
         </CardContent>
       </Card>

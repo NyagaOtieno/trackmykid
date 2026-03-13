@@ -14,20 +14,19 @@ export default defineConfig({
     open: true, // Opens browser automatically on dev
     port: 5173, 
     proxy: {
-      // Proxy for local backend (e.g., Node.js)
-      "/api": {
-        target: "http://localhost:3000",
-        changeOrigin: true,
-        secure: false,
-      },
-      // Proxy for Railway production API
-      "/railway-api": {
-        target: "https://mytrack-production.up.railway.app",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/railway-api/, ""),
-        secure: true,
-      },
-    },
+  "/api": {
+    target: "https://schooltransport-production.up.railway.app",
+    changeOrigin: true,
+    secure: true,
+  },
+  "/railway-api": {
+    target: "https://mytrack-production.up.railway.app",
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/railway-api/, ""),
+    secure: true,
+  },
+},
+
   },
   build: {
     outDir: "dist",

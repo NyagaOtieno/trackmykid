@@ -1,10 +1,12 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { getSession } from "@/lib/auth";
 
 export function ProtectedRoute() {
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
+  const location = useLocation();
+  const session = getSession();
 
-  if (!isAuthenticated) {
-    return <Navigate to="/" replace />;
+  if (!session?.token) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   return <Outlet />;
