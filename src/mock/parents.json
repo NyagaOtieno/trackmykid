@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1,
+    "name": "Sarah Johnson",
+    "phoneNumber": "+254712345678",
+    "email": "sarah.johnson@email.com",
+    "studentIds": [1]
+  },
+  {
+    "id": 2,
+    "name": "David Chen",
+    "phoneNumber": "+254723456789",
+    "email": "david.chen@email.com",
+    "studentIds": [2]
+  },
+  {
+    "id": 3,
+    "name": "Maria Martinez",
+    "phoneNumber": "+254734567890",
+    "email": "maria.martinez@email.com",
+    "studentIds": [3]
+  },
+  {
+    "id": 4,
+    "name": "Robert Wilson",
+    "phoneNumber": "+254745678901",
+    "email": "robert.wilson@email.com",
+    "studentIds": [4]
+  },
+  {
+    "id": 5,
+    "name": "Jennifer Brown",
+    "phoneNumber": "+254756789012",
+    "email": "jennifer.brown@email.com",
+    "studentIds": [5]
+  }
+]

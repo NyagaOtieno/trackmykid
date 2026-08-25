@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "name": "Morning Express",
+    "plateNumber": "KDH 432A",
+    "route": "CBD - Ngong",
+    "driver": "John Maina",
+    "capacity": 40,
+    "status": "ACTIVE"
+  },
+  {
+    "id": 2,
+    "name": "Evening Shuttle",
+    "plateNumber": "KDA 671B",
+    "route": "CBD - Langata",
+    "driver": "Peter Otieno",
+    "capacity": 35,
+    "status": "ACTIVE"
+  },
+  {
+    "id": 3,
+    "name": "School Runner",
+    "plateNumber": "KCA 123C",
+    "route": "CBD - Westlands",
+    "driver": "Mary Wanjiku",
+    "capacity": 30,
+    "status": "MAINTENANCE"
+  }
+]

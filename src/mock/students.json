@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1,
+    "name": "Emily Johnson",
+    "parent": "Sarah Johnson",
+    "busId": 1,
+    "status": "CHECKED_IN",
+    "grade": "Grade 5",
+    "phoneNumber": "+254712345678"
+  },
+  {
+    "id": 2,
+    "name": "Michael Chen",
+    "parent": "David Chen",
+    "busId": 1,
+    "status": "CHECKED_OUT",
+    "grade": "Grade 6",
+    "phoneNumber": "+254723456789"
+  },
+  {
+    "id": 3,
+    "name": "Sophia Martinez",
+    "parent": "Maria Martinez",
+    "busId": 2,
+    "status": "CHECKED_IN",
+    "grade": "Grade 4",
+    "phoneNumber": "+254734567890"
+  },
+  {
+    "id": 4,
+    "name": "James Wilson",
+    "parent": "Robert Wilson",
+    "busId": 2,
+    "status": "CHECKED_IN",
+    "grade": "Grade 7",
+    "phoneNumber": "+254745678901"
+  },
+  {
+    "id": 5,
+    "name": "Olivia Brown",
+    "parent": "Jennifer Brown",
+    "busId": 3,
+    "status": "CHECKED_OUT",
+    "grade": "Grade 5",
+    "phoneNumber": "+254756789012"
+  }
+]
