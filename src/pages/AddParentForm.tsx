@@ -38,7 +38,7 @@ export default function AddParentForm({ schools: initialSchools, onAdded, onCanc
     }
     async function fetchSchools() {
       try {
-        const res = await axios.get("https://schooltransport-production.up.railway.app/api/schools");
+        const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/schools");
         // flexibly handle res shapes
         const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.data) ? res.data.data : [];
         if (!cancelled) setSchools(arr);
@@ -71,7 +71,7 @@ export default function AddParentForm({ schools: initialSchools, onAdded, onCanc
 
     try {
       setSubmitting(true);
-      const res = await axios.post("https://schooltransport-production.up.railway.app/api/users", payload);
+      const res = await axios.post("https://tmk-api.joshpitah.co.ke/api/users", payload);
       // success codes: 200 or 201 (some backends)
       if (res.status === 201 || res.status === 200) {
         alert("Parent added successfully");

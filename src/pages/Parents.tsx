@@ -54,8 +54,8 @@ export default function ParentsUI() {
     setLoading(true);
     try {
       const [parentsRes, studentsRes] = await Promise.all([
-        axios.get<{ data: Parent[] }>("https://schooltransport-production.up.railway.app/api/parents"),
-        axios.get<{ data: Student[] }>("https://schooltransport-production.up.railway.app/api/students"),
+        axios.get<{ data: Parent[] }>("https://tmk-api.joshpitah.co.ke/api/parents"),
+        axios.get<{ data: Student[] }>("https://tmk-api.joshpitah.co.ke/api/students"),
       ]);
 
       setParents(parentsRes.data.data || []);
@@ -77,7 +77,7 @@ export default function ParentsUI() {
     if (!confirm(`Delete ${parent.user?.name || "this parent"}?`)) return;
 
     try {
-      await axios.delete(`https://schooltransport-production.up.railway.app/api/users/${userId}`);
+      await axios.delete(`https://tmk-api.joshpitah.co.ke/api/users/${userId}`);
       alert("Parent deleted successfully");
       fetchData();
     } catch (err) {
@@ -88,7 +88,7 @@ export default function ParentsUI() {
 
   const handleAddParent = async (data: Partial<User>) => {
     try {
-      await axios.post("https://schooltransport-production.up.railway.app/api/users", {
+      await axios.post("https://tmk-api.joshpitah.co.ke/api/users", {
         ...data,
         role: "PARENT",
         schoolId: SCHOOL_ID,
@@ -104,7 +104,7 @@ export default function ParentsUI() {
 
   const handleUpdateParent = async (parentId: number, data: Partial<User>) => {
     try {
-      await axios.put(`https://schooltransport-production.up.railway.app/api/users/${parentId}`, {
+      await axios.put(`https://tmk-api.joshpitah.co.ke/api/users/${parentId}`, {
         ...data,
         role: "PARENT",
         schoolId: SCHOOL_ID,

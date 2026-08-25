@@ -40,7 +40,7 @@ const busSchema = z.object({
 const getDrivers = async () => {
   const token = localStorage.getItem("token");
   const res = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/users/drivers",
+    "https://tmk-api.joshpitah.co.ke/api/users/drivers",
     { headers: { Authorization: `Bearer ${token}` } }
   );
   return res.data;
@@ -49,7 +49,7 @@ const getDrivers = async () => {
 const getAssistants = async () => {
   const token = localStorage.getItem("token");
   const res = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/users/assistants",
+    "https://tmk-api.joshpitah.co.ke/api/users/assistants",
     { headers: { Authorization: `Bearer ${token}` } }
   );
   return res.data;
@@ -58,7 +58,7 @@ const getAssistants = async () => {
 const getSchools = async () => {
   const token = localStorage.getItem("token");
   const res = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/schools",
+    "https://tmk-api.joshpitah.co.ke/api/schools",
     { headers: { Authorization: `Bearer ${token}` } }
   );
   return res.data;
@@ -74,7 +74,7 @@ const addBus = async (bus: any) => {
     capacity: Number(bus.capacity),
   };
   const res = await axios.post(
-    "https://schooltransport-production.up.railway.app/api/buses",
+    "https://tmk-api.joshpitah.co.ke/api/buses",
     body,
     { headers: { Authorization: `Bearer ${token}` } }
   );

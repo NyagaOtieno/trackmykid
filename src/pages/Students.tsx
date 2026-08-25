@@ -20,7 +20,7 @@ import {
 import toast, { Toaster } from "react-hot-toast";
 import AddStudentForm from "./AddStudentForm"; // ✅ Correct local import
 
-const API_BASE = "https://schooltransport-production.up.railway.app/api";
+const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
 
 export default function Students() {
   const [students, setStudents] = useState<any[]>([]);

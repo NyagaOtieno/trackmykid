@@ -9,7 +9,7 @@ import { getConfig, setConfig } from '@/lib/config';
 
 export default function Settings() {
   const [useMockData, setUseMockData] = useState(true);
-  const [apiBaseUrl, setApiBaseUrl] = useState('https://schooltransport-production.up.railway.app/api');
+  const [apiBaseUrl, setApiBaseUrl] = useState('https://tmk-api.joshpitah.co.ke/api');
 
   useEffect(() => {
     const config = getConfig();

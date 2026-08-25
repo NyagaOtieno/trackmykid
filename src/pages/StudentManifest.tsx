@@ -19,12 +19,12 @@ interface Manifest {
 }
 
 const fetchStudents = async () => {
-  const res = await axios.get("https://schooltransport-production.up.railway.app/api/students");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/students");
   return res.data.data as Student[];
 };
 
 const fetchManifests = async () => {
-  const res = await axios.get("https://schooltransport-production.up.railway.app/api/manifests");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/manifests");
   return res.data as Manifest[];
 };
 

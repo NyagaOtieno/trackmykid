@@ -18,35 +18,35 @@ import L from "leaflet";
  */
 
 // === CONFIG ===
-const TRACK_API_BASE = "https://mytrack-production.up.railway.app";
+const TRACK_API_BASE = "https://tmk-api.joshpitah.co.ke";
 const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 // --- API calls (existing endpoints kept) ---
 const getStudents = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/students"
+    "https://tmk-api.joshpitah.co.ke/api/students"
   );
   return data.data || [];
 };
 
 const getBuses = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/buses"
+    "https://tmk-api.joshpitah.co.ke/api/buses"
   );
   return data || [];
 };
 
 const getManifests = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/manifests"
+    "https://tmk-api.joshpitah.co.ke/api/manifests"
   );
   return data.data || [];
 };
 
 const getUsers = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/users"
+    "https://tmk-api.joshpitah.co.ke/api/users"
   );
   return data.data || [];
 };

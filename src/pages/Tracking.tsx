@@ -101,7 +101,7 @@ async function getBuses() {
     const token = sessionStorage.getItem("token");
 
     const response = await axios.get(
-      "https://schooltransport-production.up.railway.app/api/tracking/bus-locations",
+      "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations",
       { headers: { Authorization: `Bearer ${token}` } }
     );
 

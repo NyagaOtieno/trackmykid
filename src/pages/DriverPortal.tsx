@@ -35,7 +35,7 @@ export default function DriverPortal() {
     queryKey: ["users"],
     queryFn: async () => {
       const res = await axios.get(
-        "https://schooltransport-production.up.railway.app/api/users"
+        "https://tmk-api.joshpitah.co.ke/api/users"
       );
       return res.data;
     },
@@ -48,7 +48,7 @@ export default function DriverPortal() {
     queryKey: ["buses"],
     queryFn: async () => {
       const res = await axios.get(
-        "https://schooltransport-production.up.railway.app/api/buses"
+        "https://tmk-api.joshpitah.co.ke/api/buses"
       );
       return res.data;
     },
@@ -61,7 +61,7 @@ export default function DriverPortal() {
     queryKey: ["manifests"],
     queryFn: async () => {
       const res = await axios.get(
-        "https://schooltransport-production.up.railway.app/api/manifests"
+        "https://tmk-api.joshpitah.co.ke/api/manifests"
       );
       return res.data;
     },

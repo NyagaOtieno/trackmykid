@@ -55,7 +55,7 @@ export default function EditParentForm({ parent, schools: initialSchools, onUpda
     let cancelled = false;
     async function fetchSchools() {
       try {
-        const res = await axios.get("https://schooltransport-production.up.railway.app/api/schools");
+        const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/schools");
         const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.data) ? res.data.data : [];
         if (!cancelled) setSchools(arr);
       } catch (err) {
@@ -92,7 +92,7 @@ export default function EditParentForm({ parent, schools: initialSchools, onUpda
     try {
       setSubmitting(true);
       const res = await axios.put(
-        `https://schooltransport-production.up.railway.app/api/users/${userIdToUpdate}`,
+        `https://tmk-api.joshpitah.co.ke/api/users/${userIdToUpdate}`,
         payload
       );
       if (res.status === 200 || res.status === 201) {

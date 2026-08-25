@@ -43,15 +43,15 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
 
 /* ---------------- API ENDPOINTS ---------------- */
 const STUDENTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/students";
+  "https://tmk-api.joshpitah.co.ke/api/students";
 const MANIFESTS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/manifests";
+  "https://tmk-api.joshpitah.co.ke/api/manifests";
 const BUSES_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/buses";
+  "https://tmk-api.joshpitah.co.ke/api/buses";
 const USERS_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/users";
+  "https://tmk-api.joshpitah.co.ke/api/users";
 const TRACKING_ENDPOINT =
-  "https://schooltransport-production.up.railway.app/api/tracking/bus-locations";
+  "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations";
 
 /* ---------------- TYPES ---------------- */
 type Student = any;

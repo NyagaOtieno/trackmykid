@@ -66,8 +66,8 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
     const fetchData = async () => {
       try {
         const [schoolsRes, busesRes] = await Promise.all([
-          axios.get("https://schooltransport-production.up.railway.app/api/schools"),
-          axios.get("https://schooltransport-production.up.railway.app/api/buses"),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/schools"),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/buses"),
         ]);
         setSchools(schoolsRes.data);
         setBuses(busesRes.data);
@@ -128,7 +128,7 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
         parentPassword: form.parentPassword,
       };
 
-      await axios.post("https://schooltransport-production.up.railway.app/api/students", payload, {
+      await axios.post("https://tmk-api.joshpitah.co.ke/api/students", payload, {
         headers: { "Content-Type": "application/json" },
       });
 

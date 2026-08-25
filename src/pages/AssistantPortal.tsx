@@ -23,7 +23,7 @@ L.Icon.Default.mergeOptions({
 });
 
 // API Endpoints
-const API_BASE = "https://schooltransport-production.up.railway.app/api";
+const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
 const STUDENTS_API = `${API_BASE}/students`;
 const MANIFEST_API = `${API_BASE}/manifests`;
 const BUS_LOCATIONS_API = `${API_BASE}/tracking/bus-locations`;
