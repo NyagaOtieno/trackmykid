@@ -26,6 +26,10 @@ import axios from "axios";
 const busSchema = z.object({
   name: z.string().min(1, "Bus name is required"),
   plateNumber: z.string().min(1, "Plate number is required"),
+  imei: z
+    .string()
+    .optional()
+    .refine((v) => !v || /^\d{15}$/.test(v), "IMEI must be exactly 15 digits"),
   capacity: z.preprocess(
     (val) => Number(val),
     z.number().min(1, "Capacity is required")
@@ -92,6 +96,7 @@ export default function AddBusForm() {
   const [form, setForm] = useState({
     name: "",
     plateNumber: "",
+    imei: "",
     capacity: "",
     route: "",
     driverId: "",
@@ -184,6 +189,7 @@ export default function AddBusForm() {
     setForm({
       name: "",
       plateNumber: "",
+      imei: "",
       capacity: "",
       route: "",
       driverId: drivers[0]?.id.toString() || "",
@@ -231,6 +237,16 @@ export default function AddBusForm() {
               {errors.plateNumber && (
                 <p className="text-red-600">{errors.plateNumber}</p>
               )}
+            </div>
+
+            <div>
+              <Label>Tracker IMEI (optional)</Label>
+              <Input
+                value={form.imei}
+                onChange={(e) => setForm({ ...form, imei: e.target.value })}
+                placeholder="e.g., 353691849836001"
+              />
+              {errors.imei && <p className="text-red-600">{errors.imei}</p>}
             </div>
 
             <div>

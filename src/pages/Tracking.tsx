@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import "leaflet/dist/leaflet.css";
@@ -98,7 +98,7 @@ function normalizeCoordinates(v: any) {
 // ---------------- Fetch and Fix Bus Coordinates ----------------
 async function getBuses() {
   try {
-    const token = sessionStorage.getItem("token");
+    const token = localStorage.getItem("token");
 
     const response = await axios.get(
       "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations",
@@ -114,6 +114,22 @@ async function getBuses() {
   }
 }
 
+// ---------------- Fetch Bus History (trail) ----------------
+async function getBusHistory(busId: number) {
+  if (!busId) return [];
+  try {
+    const token = localStorage.getItem("token");
+    const response = await axios.get(
+      `https://tmk-api.joshpitah.co.ke/api/tracking/bus/${busId}/history`,
+      { headers: { Authorization: `Bearer ${token}` }, params: { limit: 50 } }
+    );
+    return response.data?.data || [];
+  } catch (e) {
+    console.error("Error fetching bus history:", e);
+    return [];
+  }
+}
+
 // ---------------- Main Component ----------------
 export default function Tracking() {
   const { data: buses = [], isLoading, refetch } = useQuery({
@@ -124,6 +140,14 @@ export default function Tracking() {
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  const { data: history = [] } = useQuery({
+    queryKey: ["busHistory", selectedVehicle?.busId],
+    queryFn: () => getBusHistory(selectedVehicle?.busId),
+    enabled: !!selectedVehicle?.busId && showHistory,
+    refetchInterval: 10000,
+  });
 
   const filteredLocations = useMemo(() => {
     return buses.filter((v: any) =>
@@ -166,6 +190,13 @@ export default function Tracking() {
           className="max-w-sm"
         />
         <Button onClick={() => refetch()}>Refresh</Button>
+        <Button
+          variant={showHistory ? "default" : "secondary"}
+          onClick={() => setShowHistory((s) => !s)}
+          disabled={!selectedVehicle}
+        >
+          {showHistory ? "Hide Trail" : "Show Trail"}
+        </Button>
       </div>
 
       {/* Map */}
@@ -195,6 +226,13 @@ export default function Tracking() {
               </Popup>
             </Marker>
           ))}
+
+          {showHistory && history.length > 1 && (
+            <Polyline
+              positions={history.map((p: any) => [p.lat, p.lng])}
+              pathOptions={{ color: "#2563eb", weight: 3 }}
+            />
+          )}
 
           <FlyToLocation selectedVehicle={selectedVehicle} />
         </MapContainer>
