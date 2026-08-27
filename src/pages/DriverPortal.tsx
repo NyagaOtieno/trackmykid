@@ -34,8 +34,10 @@ export default function DriverPortal() {
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
+      const token = localStorage.getItem("token");
       const res = await axios.get(
-        "https://tmk-api.joshpitah.co.ke/api/users"
+        "https://tmk-api.joshpitah.co.ke/api/users",
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       return res.data;
     },
@@ -47,8 +49,10 @@ export default function DriverPortal() {
   const { data: busesData, isLoading: busesLoading } = useQuery({
     queryKey: ["buses"],
     queryFn: async () => {
+      const token = localStorage.getItem("token");
       const res = await axios.get(
-        "https://tmk-api.joshpitah.co.ke/api/buses"
+        "https://tmk-api.joshpitah.co.ke/api/buses",
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       return res.data;
     },
@@ -60,8 +64,10 @@ export default function DriverPortal() {
   const { data: manifestsData, isLoading: manifestsLoading } = useQuery({
     queryKey: ["manifests"],
     queryFn: async () => {
+      const token = localStorage.getItem("token");
       const res = await axios.get(
-        "https://tmk-api.joshpitah.co.ke/api/manifests"
+        "https://tmk-api.joshpitah.co.ke/api/manifests",
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       return res.data;
     },

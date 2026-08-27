@@ -223,6 +223,25 @@ export default function AssistantPortal() {
     onError: (err: any) => toast.error(`Failed to update manifest: ${err?.response?.data?.message || err.message}`),
   });
 
+  const panicMutation = useMutation({
+    mutationFn: async ({ reason }: { reason: string }) => {
+      const body = { busId: bus?.id, assistantId, reason };
+      const res = await axios.post(PANIC_API, body, { headers: { Authorization: `Bearer ${token}` } });
+      return res.data;
+    },
+    onSuccess: () => toast.success("Panic sent! Help is being notified."),
+    onError: (err: any) => toast.error(`Failed to send panic: ${err?.response?.data?.message || err.message}`),
+  });
+
+  const latestUnit = useMemo(() => {
+    if (!bus || !Array.isArray(busLocationsData)) return null;
+    const plate = (bus.plateNumber || "").toLowerCase().replace(/\s+/g, "");
+    return busLocationsData.find((u: any) => {
+      const num = (u.number || u.plate || u.plateNumber || u.name || "").toString().toLowerCase().replace(/\s+/g, "");
+      return num === plate;
+    }) ?? null;
+  }, [busLocationsData, bus]);
+
   if (studentsLoading) return <p className="p-6 text-center text-muted-foreground">Loading assistant info...</p>;
   if (studentsError) return <p className="text-red-500 text-center mt-6">Error loading students.</p>;
   if (!bus) return (
@@ -288,16 +307,6 @@ export default function AssistantPortal() {
     return false;
   }
 
-  const panicMutation = useMutation({
-    mutationFn: async ({ reason }: { reason: string }) => {
-      const body = { busId: bus?.id, assistantId, reason };
-      const res = await axios.post(PANIC_API, body, { headers: { Authorization: `Bearer ${token}` } });
-      return res.data;
-    },
-    onSuccess: () => toast.success("Panic sent! Help is being notified."),
-    onError: (err: any) => toast.error(`Failed to send panic: ${err?.response?.data?.message || err.message}`),
-  });
-
   function AutoCenter({ center }: { center: [number, number] | null }) {
     const map = useMap();
     const first = useRef(true);
@@ -309,15 +318,6 @@ export default function AssistantPortal() {
     }, [center, map]);
     return null;
   }
-
-  const latestUnit = useMemo(() => {
-    if (!bus || !Array.isArray(busLocationsData)) return null;
-    const plate = (bus.plateNumber || "").toLowerCase().replace(/\s+/g, "");
-    return busLocationsData.find((u: any) => {
-      const num = (u.number || u.plate || u.plateNumber || u.name || "").toString().toLowerCase().replace(/\s+/g, "");
-      return num === plate;
-    }) ?? null;
-  }, [busLocationsData, bus]);
 
   const latestSpeed = latestUnit ? (latestUnit.speed ?? latestUnit.speed_kmh ?? latestUnit.velocity ?? null) : null;
 

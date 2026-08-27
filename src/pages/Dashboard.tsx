@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Bus, Users, ClipboardList, MapPin } from "lucide-react";
 import { toast } from "sonner";
@@ -10,101 +10,61 @@ import L from "leaflet";
 /**
  * Dashboard (single-file)
  *
- * - Keeps existing APIs (students, buses, manifests, users).
- * - Replaces the old tracking call with mytrack-production endpoints:
- *   - GET /api/devices/list
- *   - GET /api/devices/latest?imei=
- * - Uses X-API-Key header when calling mytrack-production.
+ * - Students, buses, manifests, users: authenticated API calls.
+ * - Live bus locations: real Teltonika-backed pipeline via
+ *   GET /api/tracking/bus-locations, matched by busId.
  */
 
-// === CONFIG ===
-const TRACK_API_BASE = "https://tmk-api.joshpitah.co.ke";
-const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
-
 // --- API calls (existing endpoints kept) ---
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return { Authorization: `Bearer ${token}` };
+};
+
 const getStudents = async () => {
   const { data } = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/students"
+    "https://tmk-api.joshpitah.co.ke/api/students",
+    { headers: authHeaders() }
   );
   return data.data || [];
 };
 
 const getBuses = async () => {
   const { data } = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/buses"
+    "https://tmk-api.joshpitah.co.ke/api/buses",
+    { headers: authHeaders() }
   );
-  return data || [];
+  return Array.isArray(data) ? data : data?.data || [];
 };
 
 const getManifests = async () => {
   const { data } = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/manifests"
+    "https://tmk-api.joshpitah.co.ke/api/manifests",
+    { headers: authHeaders() }
   );
   return data.data || [];
 };
 
 const getUsers = async () => {
   const { data } = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/users"
+    "https://tmk-api.joshpitah.co.ke/api/users",
+    { headers: authHeaders() }
   );
-  return data.data || [];
+  return Array.isArray(data) ? data : data?.data || [];
 };
 
-// --- TrackMyKid API helpers (use X-API-Key header) ---
-const trackAxios = axios.create({
-  baseURL: TRACK_API_BASE,
-  headers: {
-    "X-API-Key": TRACK_API_KEY,
-  },
-});
-
-const getDevices = async () => {
-  const { data } = await trackAxios.get("/api/devices/list");
-  // support responses that are either array or { data: [...] }
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.data)) return data.data;
-  return data || [];
-};
-
-const getDeviceLatest = async (imei: string) => {
+// Real live bus locations — backed by the Teltonika devicelistener pipeline,
+// matched by busId (not fragile plate-string matching).
+const getLiveBusLocations = async () => {
   try {
-    const { data } = await trackAxios.get("/api/devices/latest", { params: { imei } });
-    const payload = data?.data ?? data ?? null;
-    if (!payload) return null;
-
-    // Accept both { latitude, longitude } and { lat, lng }
-    let latitude = payload.latitude ?? payload.lat ?? null;
-    let longitude = payload.longitude ?? payload.lng ?? null;
-    const timestamp = payload.timestamp ?? payload.time ?? payload.server_time ?? null;
-
-    // Convert to numbers where possible
-    latitude = latitude !== null && latitude !== undefined ? Number(latitude) : null;
-    longitude = longitude !== null && longitude !== undefined ? Number(longitude) : null;
-
-    // Defensive swap: if latitude appears > 90 but longitude <= 90, swap them
-    if (
-      Number.isFinite(latitude) &&
-      Math.abs(latitude) > 90 &&
-      Number.isFinite(longitude) &&
-      Math.abs(longitude) <= 90
-    ) {
-      const tmp = latitude;
-      latitude = longitude;
-      longitude = tmp;
-    }
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-
-    return {
-      latitude,
-      longitude,
-      timestamp,
-      raw: payload,
-    };
+    const { data } = await axios.get(
+      "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations",
+      { headers: authHeaders() }
+    );
+    return Array.isArray(data?.data) ? data.data : [];
   } catch (err) {
-    console.error("getDeviceLatest error", imei, err);
-    return null;
+    console.error("getLiveBusLocations error", err);
+    return [];
   }
 };
 
@@ -145,8 +105,6 @@ export default function Dashboard() {
   const [studentLocations, setStudentLocations] = useState<Record<number, string>>({});
   const [manifestLocations, setManifestLocations] = useState<Record<number, any>>({});
   const [driversMap, setDriversMap] = useState<Record<number, any>>({});
-  const [devices, setDevices] = useState<any[]>([]);
-  const manifestDeviceMapRef = useRef<Record<number, any>>({}); // manifestId -> device
 
   // Queries for existing endpoints
   const { data: students = [], isLoading: loadingStudents, error: errorStudents } = useQuery({
@@ -169,13 +127,11 @@ export default function Dashboard() {
     queryFn: getUsers,
   });
 
-  // Fetch devices (track backend)
-  const { data: devicesData = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
-    queryKey: ["track-devices"],
-    queryFn: getDevices,
-    onSuccess: (d) => {
-      setDevices(d || []);
-    },
+  // Real live bus locations (Teltonika-backed), refreshed every 20s.
+  const { data: liveLocations = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
+    queryKey: ["live-bus-locations"],
+    queryFn: getLiveBusLocations,
+    refetchInterval: 20000,
   });
 
   // Map driverId -> driver object
@@ -198,9 +154,14 @@ export default function Dashboard() {
   const isLoading =
     loadingStudents || loadingBuses || loadingManifests || loadingUsers || loadingDevices;
 
-  // Today's manifests
+  // Today's manifests — memoized so its reference is stable across renders
+  // (was recomputed fresh every render, which fed a useEffect dependency
+  // and caused an infinite render loop / "Maximum update depth exceeded")
   const today = new Date().toISOString().split("T")[0];
-  const todaysManifests = manifests.filter((m: any) => m.date?.startsWith(today));
+  const todaysManifests = useMemo(
+    () => manifests.filter((m: any) => m.date?.startsWith(today)),
+    [manifests, today]
+  );
 
   // Student location reverse-geocode (unchanged)
   useEffect(() => {
@@ -214,157 +175,54 @@ export default function Dashboard() {
     });
   }, [students]);
 
-  // Normalize plate helper
-  const normalizePlate = (v: any) => {
-    if (!v) return "";
-    return String(v).replace(/[\s\-]/g, "").toUpperCase();
-  };
-
-  // Resolve device match & fetch initial locations for manifests
+  // Resolve each of today's manifests to its bus's real live location,
+  // matched by busId (reliable) instead of plate-string matching.
   useEffect(() => {
-    // require devices to be loaded
-    if (!devices || devices.length === 0) return;
+    if (!liveLocations || liveLocations.length === 0) return;
 
-    // iterate manifests for today
     todaysManifests.forEach(async (m: any) => {
-      // skip if already resolved
-      if (manifestLocations[m.id]) return;
-
-      const busObj = m.bus || {};
-      const candidates = [
-        busObj.registration,
-        busObj.vehicle_no,
-        busObj.name,
-        m.bus_no,
-        m.vehicle_no,
-      ]
-        .filter(Boolean)
-        .map(normalizePlate);
-
-      if (candidates.length === 0) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No vehicle registration available" }));
+      const busId = m.bus?.id ?? m.busId;
+      if (!busId) {
+        if (manifestLocations[m.id] !== "No bus assigned") {
+          setManifestLocations((prev) => ({ ...prev, [m.id]: "No bus assigned" }));
+        }
         return;
       }
 
-      const foundDevice = devices.find((d: any) => {
-        const devPlate = normalizePlate(d.vehicle_no ?? d.vehicleNo ?? d.vehicle_no ?? d.vehicleNo);
-        return candidates.includes(devPlate);
-      });
+      const loc = liveLocations.find((l: any) => l.busId === busId);
 
-      if (!foundDevice) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No tracking device matched" }));
+      if (!loc || loc.lat == null || loc.lng == null) {
+        if (manifestLocations[m.id] !== "No live location yet") {
+          setManifestLocations((prev) => ({ ...prev, [m.id]: "No live location yet" }));
+        }
         return;
       }
 
-      // save mapping
-      manifestDeviceMapRef.current[m.id] = foundDevice;
+      const existing = manifestLocations[m.id];
+      const alreadyHasAddressForSamePoint =
+        existing &&
+        typeof existing === "object" &&
+        existing.latitude === loc.lat &&
+        existing.longitude === loc.lng &&
+        existing.address;
 
-      if (!foundDevice.imei) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "Device found but IMEI missing" }));
-        return;
-      }
-
-      // temp loading state
-      setManifestLocations((prev) => ({ ...prev, [m.id]: "Loading location..." }));
-
-      // fetch latest
-      const latest = await getDeviceLatest(foundDevice.imei);
-      if (!latest) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No location returned" }));
-        return;
-      }
-
-      // reverse geocode
-      const address = await getLocationFromLatLon(latest.latitude, latest.longitude);
+      const address = alreadyHasAddressForSamePoint
+        ? existing.address
+        : await getLocationFromLatLon(loc.lat, loc.lng);
 
       setManifestLocations((prev) => ({
         ...prev,
         [m.id]: {
-          latitude: latest.latitude,
-          longitude: latest.longitude,
-          timestamp: latest.timestamp,
+          latitude: loc.lat,
+          longitude: loc.lng,
+          timestamp: loc.lastUpdate,
           address,
-          imei: foundDevice.imei,
-          deviceId: foundDevice.id,
-          raw: latest.raw,
+          movementState: loc.movementState,
         },
       }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
-
-  // Polling: refresh latest positions for unique IMEIs matched to today's manifests
-  useEffect(() => {
-    let cancelled = false;
-    const runPoll = async () => {
-      try {
-        // collect unique IMEIs from manifestDeviceMapRef
-        const imeis = Array.from(
-          new Set(
-            Object.values(manifestDeviceMapRef.current)
-              .filter(Boolean)
-              .map((d: any) => d.imei)
-              .filter(Boolean)
-          )
-        );
-
-        if (imeis.length === 0) return;
-
-        // fetch all latest concurrently
-        const results = await Promise.all(
-          imeis.map(async (imei) => {
-            const latest = await getDeviceLatest(imei);
-            return { imei, latest };
-          })
-        );
-
-        if (cancelled) return;
-
-        // Update each manifestLocations entry that maps to a given imei
-        const updates: Record<number, any> = {};
-        Object.entries(manifestDeviceMapRef.current).forEach(([manifestIdStr, device]) => {
-          const manifestId = Number(manifestIdStr);
-          const found = results.find((r) => r.imei === device.imei);
-          const entry = found?.latest;
-          if (!entry) return;
-          // reverse geocode if address changed or missing
-          (async () => {
-            const address =
-              manifestLocations[manifestId]?.address ||
-              (entry ? await getLocationFromLatLon(entry.latitude, entry.longitude) : "Unknown location");
-
-            updates[manifestId] = {
-              latitude: entry.latitude,
-              longitude: entry.longitude,
-              timestamp: entry.timestamp,
-              address,
-              imei: device.imei,
-              deviceId: device.id,
-              raw: entry.raw,
-            };
-
-            // push updates into state (batch)
-            setManifestLocations((prev) => ({ ...prev, ...updates }));
-          })();
-        });
-      } catch (err) {
-        console.error("Polling error", err);
-      }
-    };
-
-    // initial run
-    runPoll();
-
-    const id = setInterval(() => {
-      runPoll();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
+  }, [liveLocations, todaysManifests]);
 
   // ensure manifestLocations that have lat/lon but no address get reverse-geocoded
   useEffect(() => {

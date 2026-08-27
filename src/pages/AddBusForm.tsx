@@ -44,19 +44,19 @@ const busSchema = z.object({
 const getDrivers = async () => {
   const token = localStorage.getItem("token");
   const res = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/users/drivers",
+    "https://tmk-api.joshpitah.co.ke/api/users?role=DRIVER",
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  return res.data;
+  return Array.isArray(res.data) ? res.data : res.data?.data || [];
 };
 
 const getAssistants = async () => {
   const token = localStorage.getItem("token");
   const res = await axios.get(
-    "https://tmk-api.joshpitah.co.ke/api/users/assistants",
+    "https://tmk-api.joshpitah.co.ke/api/users?role=ASSISTANT",
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  return res.data;
+  return Array.isArray(res.data) ? res.data : res.data?.data || [];
 };
 
 const getSchools = async () => {
@@ -65,7 +65,7 @@ const getSchools = async () => {
     "https://tmk-api.joshpitah.co.ke/api/schools",
     { headers: { Authorization: `Bearer ${token}` } }
   );
-  return res.data;
+  return Array.isArray(res.data) ? res.data : res.data?.data || [];
 };
 
 const addBus = async (bus: any) => {

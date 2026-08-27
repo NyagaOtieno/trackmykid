@@ -48,14 +48,15 @@ export default function ParentsUI() {
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   const itemsPerPage = 15;
-  const SCHOOL_ID = 14;
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      const token = localStorage.getItem("token");
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       const [parentsRes, studentsRes] = await Promise.all([
-        axios.get<{ data: Parent[] }>("https://tmk-api.joshpitah.co.ke/api/parents"),
-        axios.get<{ data: Student[] }>("https://tmk-api.joshpitah.co.ke/api/students"),
+        axios.get<{ data: Parent[] }>("https://tmk-api.joshpitah.co.ke/api/parents", { headers: authHeaders }),
+        axios.get<{ data: Student[] }>("https://tmk-api.joshpitah.co.ke/api/students", { headers: authHeaders }),
       ]);
 
       setParents(parentsRes.data.data || []);
@@ -77,7 +78,9 @@ export default function ParentsUI() {
     if (!confirm(`Delete ${parent.user?.name || "this parent"}?`)) return;
 
     try {
-      await axios.delete(`https://tmk-api.joshpitah.co.ke/api/users/${userId}`);
+      const token = localStorage.getItem("token");
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      await axios.delete(`https://tmk-api.joshpitah.co.ke/api/users/${userId}`, { headers: authHeaders });
       alert("Parent deleted successfully");
       fetchData();
     } catch (err) {
@@ -88,11 +91,12 @@ export default function ParentsUI() {
 
   const handleAddParent = async (data: Partial<User>) => {
     try {
+      const token = localStorage.getItem("token");
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       await axios.post("https://tmk-api.joshpitah.co.ke/api/users", {
         ...data,
         role: "PARENT",
-        schoolId: SCHOOL_ID,
-      });
+      }, { headers: authHeaders });
       alert("Parent added successfully");
       setAddingParent(false);
       fetchData();
@@ -104,11 +108,12 @@ export default function ParentsUI() {
 
   const handleUpdateParent = async (parentId: number, data: Partial<User>) => {
     try {
+      const token = localStorage.getItem("token");
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
       await axios.put(`https://tmk-api.joshpitah.co.ke/api/users/${parentId}`, {
         ...data,
         role: "PARENT",
-        schoolId: SCHOOL_ID,
-      });
+      }, { headers: authHeaders });
       alert("Parent updated successfully");
       setEditingParent(null);
       fetchData();

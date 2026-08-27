@@ -65,12 +65,15 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
   useEffect(() => {
     const fetchData = async () => {
       try {
+        const token = localStorage.getItem("token");
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
         const [schoolsRes, busesRes] = await Promise.all([
-          axios.get("https://tmk-api.joshpitah.co.ke/api/schools"),
-          axios.get("https://tmk-api.joshpitah.co.ke/api/buses"),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/schools", { headers: authHeaders }),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/buses", { headers: authHeaders }),
         ]);
-        setSchools(schoolsRes.data);
-        setBuses(busesRes.data);
+        const unwrap = (d: any) => (Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []);
+        setSchools(unwrap(schoolsRes.data));
+        setBuses(unwrap(busesRes.data));
       } catch (err) {
         console.error(err);
         toast.error("Failed to load schools or buses.");
@@ -128,8 +131,12 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
         parentPassword: form.parentPassword,
       };
 
+      const token = localStorage.getItem("token");
       await axios.post("https://tmk-api.joshpitah.co.ke/api/students", payload, {
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
 
       toast.success("✅ Student added successfully!");

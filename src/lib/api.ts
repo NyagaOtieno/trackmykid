@@ -47,7 +47,11 @@ export const getBusesWithRelations = () =>
   api.get("/buses?includeRelations=true").then((res) => res.data);
 
 // ✅ Simple buses list
-export const getBuses = () => api.get("/buses").then((res) => res.data);
+export const getBuses = () =>
+  api.get("/buses").then((res) => {
+    const d = res.data;
+    return Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
+  });
 
 export const getManifests = () => api.get("/manifests").then((res) => res.data);
 

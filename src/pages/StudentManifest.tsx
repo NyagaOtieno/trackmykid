@@ -18,13 +18,18 @@ interface Manifest {
   student: Student;
 }
 
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const fetchStudents = async () => {
-  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/students");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/students", { headers: authHeaders() });
   return res.data.data as Student[];
 };
 
 const fetchManifests = async () => {
-  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/manifests");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/manifests", { headers: authHeaders() });
   return res.data as Manifest[];
 };
 

@@ -65,9 +65,9 @@ export default function Buses() {
   const filteredBuses = sortedBuses.filter((bus) => {
     const search = searchTerm.toLowerCase();
     return (
-      bus.name.toLowerCase().includes(search) ||
-      bus.plateNumber.toLowerCase().includes(search) ||
-      bus.route.toLowerCase().includes(search)
+      (bus.name ?? "").toLowerCase().includes(search) ||
+      (bus.plateNumber ?? "").toLowerCase().includes(search) ||
+      (bus.route ?? "").toLowerCase().includes(search)
     );
   });
 

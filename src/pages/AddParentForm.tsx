@@ -1,62 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 
-interface School { id: number; name: string; }
 interface Props {
-  schools?: School[]; // optional: parents UI passes this to avoid double fetch
   onAdded: () => void; // parent should refresh list; do not duplicate alerts there
   onCancel: () => void;
 }
 
-export default function AddParentForm({ schools: initialSchools, onAdded, onCancel }: Props) {
+export default function AddParentForm({ onAdded, onCancel }: Props) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [schoolId, setSchoolId] = useState<number | null>(null);
 
-  const [schools, setSchools] = useState<School[]>(initialSchools ?? []);
-  const [loadingSchools, setLoadingSchools] = useState(!initialSchools);
   const [submitting, setSubmitting] = useState(false);
-
-  // If parent component didn't hand schools in, fetch them here
-  useEffect(() => {
-    let cancelled = false;
-    if (initialSchools && initialSchools.length) {
-      setSchools(initialSchools);
-      setLoadingSchools(false);
-      return;
-    }
-    async function fetchSchools() {
-      try {
-        const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/schools");
-        // flexibly handle res shapes
-        const arr = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.data) ? res.data.data : [];
-        if (!cancelled) setSchools(arr);
-      } catch (err) {
-        console.error("Failed to fetch schools:", err);
-      } finally {
-        if (!cancelled) setLoadingSchools(false);
-      }
-    }
-    fetchSchools();
-    return () => { cancelled = true; };
-  }, [initialSchools]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return; // prevent double submit
-    if (!name.trim() || !password.trim() || !schoolId) {
-      alert("Please provide name, password and select a school.");
+    if (!name.trim() || !password.trim()) {
+      alert("Please provide name and password.");
       return;
     }
 
@@ -66,12 +30,14 @@ export default function AddParentForm({ schools: initialSchools, onAdded, onCanc
       password: password.trim(),
       phone: phone.trim() || undefined,
       role: "PARENT",
-      schoolId,
     };
 
     try {
       setSubmitting(true);
-      const res = await axios.post("https://tmk-api.joshpitah.co.ke/api/users", payload);
+      const token = localStorage.getItem("token");
+      const res = await axios.post("https://tmk-api.joshpitah.co.ke/api/users", payload, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       // success codes: 200 or 201 (some backends)
       if (res.status === 201 || res.status === 200) {
         alert("Parent added successfully");
@@ -80,7 +46,6 @@ export default function AddParentForm({ schools: initialSchools, onAdded, onCanc
         setEmail("");
         setPhone("");
         setPassword("");
-        setSchoolId(null);
         onAdded(); // parent will re-fetch; do NOT show another alert there
       } else {
         console.error("Unexpected response:", res.data);
@@ -114,26 +79,6 @@ export default function AddParentForm({ schools: initialSchools, onAdded, onCanc
       <div>
         <label className="block text-sm font-medium">Password</label>
         <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium">School</label>
-        <Select
-          value={schoolId ? String(schoolId) : ""}
-          onValueChange={(v) => setSchoolId(Number(v))}
-          disabled={loadingSchools || schools.length === 0}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder={loadingSchools ? "Loading schools..." : "Select a school"} />
-          </SelectTrigger>
-          <SelectContent>
-            {schools.map((s) => (
-              <SelectItem key={s.id} value={String(s.id)}>
-                {s.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="flex justify-end gap-2">

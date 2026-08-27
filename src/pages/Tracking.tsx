@@ -150,7 +150,8 @@ export default function Tracking() {
   });
 
   const filteredLocations = useMemo(() => {
-    return buses.filter((v: any) =>
+    const list = Array.isArray(buses) ? buses : [];
+    return list.filter((v: any) =>
       v.plateNumber?.toLowerCase().includes(search.toLowerCase())
     );
   }, [buses, search]);
@@ -217,8 +218,8 @@ export default function Tracking() {
               <Popup>
                 <div className="p-2">
                   <h3 className="font-bold">{bus.plateNumber}</h3>
-                  <p>Lat: {bus.lat.toFixed(5)}</p>
-                  <p>Lng: {bus.lng.toFixed(5)}</p>
+                  <p>Lat: {typeof bus.lat === "number" ? bus.lat.toFixed(5) : "N/A"}</p>
+                  <p>Lng: {typeof bus.lng === "number" ? bus.lng.toFixed(5) : "N/A"}</p>
                   <p>Movement: {bus.movementState}</p>
                   <p>Driver: {bus.driver?.name || "N/A"}</p>
                   <p>Assistant: {bus.assistant?.name || "N/A"}</p>

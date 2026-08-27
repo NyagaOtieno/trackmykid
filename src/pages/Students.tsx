@@ -33,7 +33,9 @@ export default function Students() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/students`);
+        const token = localStorage.getItem("token");
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+        const res = await axios.get(`${API_BASE}/students`, { headers: authHeaders });
         const studentsData = res.data.data || [];
         setStudents(studentsData);
         setFilteredStudents(studentsData);
@@ -61,7 +63,9 @@ export default function Students() {
   // ✅ Handle refresh after adding student
   const handleStudentAdded = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/students`);
+      const token = localStorage.getItem("token");
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await axios.get(`${API_BASE}/students`, { headers: authHeaders });
       const studentsData = res.data.data || [];
       setStudents(studentsData);
       setFilteredStudents(studentsData);
