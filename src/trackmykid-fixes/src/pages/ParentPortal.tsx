@@ -14,10 +14,23 @@ import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useMemo, useEffect } from "react";
-// Same icon builder Tracking.tsx (admin) uses, so parent and admin
-// render the identical bus marker instead of the old mismatched
-// flaticon PNGs (which also had inverted moving/stopped colors).
-import { createBusIcon } from "@/utils/vehicleIcon";
+
+/* ---------------- Bus Icons (🚍 style) ---------------- */
+const busIconGreen = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61439.png", // green bus
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+});
+const busIconRed = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61437.png", // red bus
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+});
+const busIconGray = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61436.png", // gray bus
+  iconSize: [32, 32],
+  iconAnchor: [16, 32],
+});
 
 /* ---------------- Auto-fit map bounds component ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
@@ -410,16 +423,10 @@ export default function ParentPortal() {
             <FitBounds bounds={bounds} />
 
             {markersWithCoords.map((v) => {
-              // Same icon builder as the admin Tracking page: colored by
-              // movementState, grayed out when this isn't a live device
-              // fix (e.g. falling back to a manifest-recorded location).
-              const icon = createBusIcon({
-                plateNumber: v.plate,
-                movementState: v.movementState,
-                lat: v.lat,
-                lng: v.lon,
-                __fallback: v.liveSource !== "device",
-              });
+              // Default gray bus
+              let icon = busIconGray;
+              if (v.movementState === "moving") icon = busIconGreen;
+              else if (v.movementState === "stopped") icon = busIconRed;
 
               return (
                 <Marker

@@ -4,8 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import "leaflet/dist/leaflet.css";
-import { getBusLocations } from "./api";
-import { createBusIcon } from "@/utils/vehicleIcon";
+import * as L from "leaflet";
+import axios from "axios";
 
 // ---------------- Fly to selected vehicle ----------------
 function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
@@ -18,6 +18,39 @@ function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
 
   return null;
 }
+
+// ---------------- Vehicle Icon ----------------
+const createVehicleIcon = (vehicle: any) => {
+  const isFallback = vehicle.__fallback === true;
+
+  const color = isFallback
+    ? "#6c757d"
+    : vehicle.movementState?.toLowerCase() === "standing"
+    ? "#28a745"
+    : "#dc3545";
+
+  return L.divIcon({
+    html: `<div style="
+      transform: rotate(${vehicle.direction || 0}deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: ${color};
+      color: white;
+      font-size: 10px;
+      font-weight: bold;
+      border-radius: 4px;
+      border: 1px solid #fff;
+      padding: 2px 4px;
+      min-width: 26px;
+      height: 24px;
+      white-space: nowrap;
+    ">🚍 ${vehicle.plateNumber}</div>`,
+    className: "",
+    iconSize: [28, 24],
+    iconAnchor: [14, 12],
+  });
+};
 
 // ---------------- Coordinate Normalizer ----------------
 function normalizeCoordinates(v: any) {
@@ -63,17 +96,18 @@ function normalizeCoordinates(v: any) {
 }
 
 // ---------------- Fetch and Fix Bus Coordinates ----------------
-// Uses the shared `api` client (baseURL from env, auth header + 401
-// interceptor, 15s timeout, and unwrap() to guarantee an array back
-// no matter what shape the backend responds with). Previously this
-// called axios directly with a hardcoded URL and no timeout, which is
-// what caused the page to hang forever on a slow response and crash
-// with "buses.filter is not a function" when the response shape
-// wasn't exactly { data: [...] }.
 async function getBuses() {
   try {
-    const buses = await getBusLocations();
-    return (Array.isArray(buses) ? buses : []).map((v: any) => normalizeCoordinates(v));
+    const token = localStorage.getItem("token");
+
+    const response = await axios.get(
+      "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations",
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    const buses = response.data?.data || [];
+    return buses.map((v: any) => normalizeCoordinates(v));
+
   } catch (e) {
     console.error("Error fetching buses:", e);
     return [];
@@ -86,21 +120,16 @@ export default function Tracking() {
     queryKey: ["buses"],
     queryFn: getBuses,
     refetchInterval: 5000,
-    retry: 2, // don't let a flaky/erroring endpoint retry-loop forever
   });
 
   const [search, setSearch] = useState("");
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 
-  // Defensive: getBuses() always resolves to an array, but guard here too
-  // so a bad cache value can never crash this component again.
-  const busList = Array.isArray(buses) ? buses : [];
-
   const filteredLocations = useMemo(() => {
-    return busList.filter((v: any) =>
+    return buses.filter((v: any) =>
       v.plateNumber?.toLowerCase().includes(search.toLowerCase())
     );
-  }, [busList, search]);
+  }, [buses, search]);
 
   // Auto-center on a valid real location
   useEffect(() => {
@@ -151,7 +180,7 @@ export default function Tracking() {
             <Marker
               key={bus.busId}
               position={[bus.lat, bus.lng]}
-              icon={createBusIcon(bus, selectedVehicle?.busId === bus.busId)}
+              icon={createVehicleIcon(bus)}
               eventHandlers={{ click: () => setSelectedVehicle(bus) }}
             >
               <Popup>

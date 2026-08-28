@@ -1,5 +1,10 @@
 import axios from "axios";
 
+// Backend list endpoints return { success, count, data }. Some legacy ones
+// return a raw array. This normalizes either shape to a plain array so
+// callers can always safely .filter()/.map() the result.
+const unwrap = (res: any) => (Array.isArray(res) ? res : res?.data || []);
+
 // ✅ Create Axios instance using .env value or fallback
 const api = axios.create({
   baseURL:
@@ -8,6 +13,10 @@ const api = axios.create({
   headers: {
     "Content-Type": "application/json",
   },
+  // Without a timeout, a slow/unresponsive backend leaves any caller's
+  // useQuery stuck in isLoading forever (this was the "Tracking page
+  // hangs" bug — Tracking.tsx used a raw axios call with no timeout).
+  timeout: 15000,
 });
 
 // ✅ Automatically attach Bearer token (if available)
@@ -40,46 +49,35 @@ api.interceptors.response.use(
 // ======================
 // GET / FETCH Functions
 // ======================
-export const getStudents = () => api.get("/students").then((res) => res.data);
+export const getStudents = () => api.get("/students").then((res) => unwrap(res.data));
 
 // ✅ Fetch buses with expanded relations (driver, assistant, school)
 export const getBusesWithRelations = () =>
-  api.get("/buses?includeRelations=true").then((res) => res.data);
+  api.get("/buses?includeRelations=true").then((res) => unwrap(res.data));
 
 // ✅ Simple buses list
-export const getBuses = () =>
-  api.get("/buses").then((res) => {
-    const d = res.data;
-    return Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
-  });
+export const getBuses = () => api.get("/buses").then((res) => unwrap(res.data));
 
-export const getManifests = () => api.get("/manifests").then((res) => res.data);
+export const getManifests = () => api.get("/manifests").then((res) => unwrap(res.data));
 
 // ✅ Tracking Routes
 export const getLiveLocations = () =>
-  api.get("/tracking/live-locations").then((res) => res.data);
+  api.get("/tracking/live-locations").then((res) => unwrap(res.data));
 export const syncTracking = () =>
   api.get("/tracking/sync").then((res) => res.data);
 export const getBusLocations = () =>
-  api.get("/tracking/bus-locations").then((res) => res.data);
-
-// Backend inconsistently returns either a bare array or { data: [...] } —
-// normalize every list response so callers can always safely call
-// .filter/.map/.find on the result.
-const unwrapList = (data: any) =>
-  Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  api.get("/tracking/bus-locations").then((res) => unwrap(res.data));
 
 // ✅ User Role Routes
 export const getAssistants = () =>
-  api.get("/users?role=ASSISTANT").then((res) => unwrapList(res.data));
+  api.get("/users?role=ASSISTANT").then((res) => unwrap(res.data));
 export const getParents = () =>
-  api.get("/users?role=PARENT").then((res) => unwrapList(res.data));
+  api.get("/users?role=PARENT").then((res) => unwrap(res.data));
 export const getDrivers = () =>
-  api.get("/users?role=DRIVER").then((res) => unwrapList(res.data));
+  api.get("/users?role=DRIVER").then((res) => unwrap(res.data));
 export const getAdmins = () =>
-  api.get("/users?role=ADMIN").then((res) => unwrapList(res.data));
-export const getSchools = () =>
-  api.get("/schools").then((res) => unwrapList(res.data));
+  api.get("/users?role=ADMIN").then((res) => unwrap(res.data));
+export const getSchools = () => api.get("/schools").then((res) => unwrap(res.data));
 
 // ======================
 // CRUD Functions

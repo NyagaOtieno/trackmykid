@@ -110,29 +110,6 @@ export default function AssistantPortal() {
     }
   }
 
-  // Send SMS (backend)
-  async function sendSmsNotification(payload: {
-    studentId: string | number;
-    status: string;
-    session: string;
-    busId?: string | number | null;
-    assistantId?: string | number | null;
-    latitude?: number;
-    longitude?: number;
-  }) {
-    try {
-      await axios.post(`${API_BASE}/sms/manifest`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toast.message("SMS notification sent (backend).");
-    } catch (err: any) {
-      console.warn("SMS notify failed:", err?.response?.data ?? err.message);
-      if (err?.response?.status && err.response.status !== 404) {
-        toast.error(`SMS send failed: ${err?.response?.data?.message || err.message}`);
-      }
-    }
-  }
-
   // Bus location tracking
   useEffect(() => {
     if (!bus || !Array.isArray(busLocationsData)) return;
@@ -160,12 +137,10 @@ export default function AssistantPortal() {
 
     (async () => {
       try {
-        const res = await axios.get(`${API_BASE}/geocode/reverse`, {
-          params: { lat, lon: lng },
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await axios.get(`https://nominatim.openstreetmap.org/reverse`, {
+          params: { format: "json", lat, lon: lng },
         });
-        const geoData = res.data ?? {};
-        const addr = geoData.display_name ?? geoData.address ?? geoData.name ?? geoData.result ?? "Unknown location";
+        const addr = res.data?.display_name ?? "Unknown location";
         setBusLocation({ lat, lng, address: addr });
       } catch {
         setBusLocation({ lat, lng, address: "Address unavailable" });
@@ -218,7 +193,9 @@ export default function AssistantPortal() {
       toast.success(`${label} successfully!`);
       queryClient.invalidateQueries(["manifests"]);
       refetchManifests();
-      await sendSmsNotification({ studentId: vars.studentId, status: vars.status, session: vars.session, busId: bus?.id, assistantId, latitude: vars.latitude ?? undefined, longitude: vars.longitude ?? undefined });
+      // Note: SMS notification to the parent is already sent server-side
+      // by the /api/manifests endpoint above (see notifyRecipient in
+      // manifestController.js). No separate client-side call is needed.
     },
     onError: (err: any) => toast.error(`Failed to update manifest: ${err?.response?.data?.message || err.message}`),
   });
