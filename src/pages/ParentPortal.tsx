@@ -9,11 +9,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 // Same icon builder Tracking.tsx (admin) uses, so parent and admin
 // render the identical bus marker instead of the old mismatched
 // flaticon PNGs (which also had inverted moving/stopped colors).
@@ -25,6 +32,18 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   useEffect(() => {
     if (bounds) map.fitBounds(bounds, { padding: [50, 50] });
   }, [bounds, map]);
+  return null;
+}
+
+/* ---------------- Fly to the selected child's bus ---------------- */
+// Zooms in on the selected student's live position, but only when
+// they're actually onboard (has a lat/lon) — the backend/UI already
+// hide location entirely otherwise, so there's nothing to zoom to.
+function FocusOnSelected({ target }: { target: { lat: number; lon: number } | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) map.flyTo([target.lat, target.lon], 16, { duration: 1 });
+  }, [target, map]);
   return null;
 }
 
@@ -88,6 +107,7 @@ export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("all");
 
   const handleLogout = () => {
     localStorage.removeItem("parent");
@@ -234,11 +254,22 @@ export default function ParentPortal() {
     let lastSeen: string | undefined = undefined;
     let movementState: string | undefined = undefined;
 
-    // Only show a live position when the backend confirms the child is
-    // actually onboard right now — never derived client-side from plate
-    // matching, which can't distinguish "bus is moving" from "child boarded".
+    let status: StudentView["status"] = "UNKNOWN";
+    if (latest?.status) {
+      const st = (latest.status ?? "").toString().toUpperCase();
+      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
+      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
+    } else {
+      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
+      else if (latest?.alightingTime) status = "CHECKED_OUT";
+    }
+
+    // Only ever place a marker while the child is genuinely onboard right
+    // now. Both branches below are gated on status === "CHECKED_IN" so an
+    // offboarded child's last-known (boarding-time) coordinates can never
+    // leak onto the map after they've been checked out.
     const tracking = childTracking[s.id];
-    if (tracking?.tripStatus === "ONBOARD" && tracking?.location) {
+    if (status === "CHECKED_IN" && tracking?.tripStatus === "ONBOARD" && tracking?.location) {
       lat = tracking.location.lat != null ? Number(tracking.location.lat) : undefined;
       lon = tracking.location.lng != null ? Number(tracking.location.lng) : undefined;
       readableLocation = s.name;
@@ -247,7 +278,7 @@ export default function ParentPortal() {
       movementState = tracking.location.movementState ?? "unknown";
     }
 
-    if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
+    if (status === "CHECKED_IN" && (!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
       lat = Number(latest.latitude);
       lon = Number(latest.longitude);
       readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
@@ -260,15 +291,6 @@ export default function ParentPortal() {
     const assistantName =
       busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
 
-    let status: StudentView["status"] = "UNKNOWN";
-    if (latest?.status) {
-      const st = (latest.status ?? "").toString().toUpperCase();
-      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
-      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
-    } else {
-      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
-      else if (latest?.alightingTime) status = "CHECKED_OUT";
-    }
 
     return {
       student: s,
@@ -287,7 +309,7 @@ export default function ParentPortal() {
     };
   });
 
-  const markersWithCoords = studentViews.filter(
+  const onboardWithCoords = studentViews.filter(
     (v) =>
       v.lat != null &&
       v.lon != null &&
@@ -296,9 +318,30 @@ export default function ParentPortal() {
       v.lon >= -180 &&
       v.lon <= 180
   );
+
+  /* ---------------- Selected child (dropdown) ---------------- */
+  const selectedView =
+    selectedStudentId === "all"
+      ? null
+      : studentViews.find((v) => String(v.student.id) === selectedStudentId) ?? null;
+  const selectedIsOnboard = selectedView?.status === "CHECKED_IN" && selectedView?.lat != null && selectedView?.lon != null;
+  const focusTarget = selectedIsOnboard ? { lat: selectedView!.lat!, lon: selectedView!.lon! } : null;
+
+  // The map only ever shows the bus for the child currently selected in
+  // the dropdown — and only if they've actually boarded. Selecting "All
+  // children" still shows every onboard child's bus; selecting one
+  // specific child who hasn't boarded shows no marker at all.
+  const markersWithCoords =
+    selectedStudentId === "all"
+      ? onboardWithCoords
+      : selectedIsOnboard
+      ? onboardWithCoords.filter((v) => String(v.student.id) === selectedStudentId)
+      : [];
+
   const bounds = markersWithCoords.length
     ? L.latLngBounds(markersWithCoords.map((v) => [v.lat!, v.lon!]))
     : null;
+
 
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
@@ -336,6 +379,32 @@ export default function ParentPortal() {
           </p>
         </div>
 
+        {studentViews.length > 0 && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <label className="text-sm font-medium text-muted-foreground shrink-0">
+              Select child:
+            </label>
+            <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue placeholder="Select a child" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All children</SelectItem>
+                {studentViews.map((v) => (
+                  <SelectItem key={v.student.id} value={String(v.student.id)}>
+                    {v.student.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedView && !selectedIsOnboard && (
+              <span className="text-xs text-muted-foreground">
+                {selectedView.student.name} isn't onboard right now — no live location to show.
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {loadingStudents ? (
             <p className="col-span-full text-center text-muted-foreground">
@@ -346,7 +415,9 @@ export default function ParentPortal() {
               No students found for your account.
             </Card>
           ) : (
-            studentViews.map((v) => {
+            studentViews
+              .filter((v) => selectedStudentId === "all" || String(v.student.id) === selectedStudentId)
+              .map((v) => {
               const s = v.student;
               const manifest = v.manifest;
               const statusLabel =
@@ -357,7 +428,13 @@ export default function ParentPortal() {
                   : "Not Onboarded";
 
               return (
-                <Card key={s.id}>
+                <Card
+                  key={s.id}
+                  onClick={() => setSelectedStudentId(String(s.id))}
+                  className={`cursor-pointer transition-colors hover:border-primary ${
+                    selectedStudentId === String(s.id) ? "border-primary ring-1 ring-primary" : ""
+                  }`}
+                >
                   <CardHeader>
                     <CardTitle>{s.name}</CardTitle>
                     <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
@@ -402,47 +479,48 @@ export default function ParentPortal() {
 
         <div className="h-[500px]">
           <MapContainer
-            center={[-1, 36]}
-            zoom={4}
-            style={{ width: "100%", height: "100%" }}
-          >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            <FitBounds bounds={bounds} />
+              center={[-1, 36]}
+              zoom={4}
+              style={{ width: "100%", height: "100%" }}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <FitBounds bounds={bounds} />
+              <FocusOnSelected target={focusTarget} />
 
-            {markersWithCoords.map((v) => {
-              // Same icon builder as the admin Tracking page: colored by
-              // movementState, grayed out when this isn't a live device
-              // fix (e.g. falling back to a manifest-recorded location).
-              const icon = createBusIcon({
-                plateNumber: v.plate,
-                movementState: v.movementState,
-                lat: v.lat,
-                lng: v.lon,
-                __fallback: v.liveSource !== "device",
-              });
+              {markersWithCoords.map((v) => {
+                // Same icon builder as the admin Tracking page: colored by
+                // movementState, grayed out when this isn't a live device
+                // fix (e.g. falling back to a manifest-recorded location).
+                const icon = createBusIcon({
+                  plateNumber: v.plate,
+                  movementState: v.movementState,
+                  lat: v.lat,
+                  lng: v.lon,
+                  __fallback: v.liveSource !== "device",
+                });
 
-              return (
-                <Marker
-                  key={v.student.id}
-                  position={[Number(v.lat!), Number(v.lon!)]}
-                  icon={icon}
-                >
-                  <Popup>
-                    <div className="space-y-1">
-                      <strong>{v.student.name}</strong>
-                      <div>{v.busName}</div>
-                      <div>Status: {v.status}</div>
-                      <div>{v.readableLocation}</div>
-                      <div>Driver: {v.driver}</div>
-                      <div>Assistant: {v.assistant}</div>
-                      {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
-                      {v.movementState && <div>Bus Movement: {v.movementState}</div>}
-                    </div>
-                  </Popup>
-                </Marker>
-              );
-            })}
-          </MapContainer>
+                return (
+                  <Marker
+                    key={v.student.id}
+                    position={[Number(v.lat!), Number(v.lon!)]}
+                    icon={icon}
+                  >
+                    <Popup>
+                      <div className="space-y-1">
+                        <strong>{v.student.name}</strong>
+                        <div>{v.busName}</div>
+                        <div>Status: {v.status}</div>
+                        <div>{v.readableLocation}</div>
+                        <div>Driver: {v.driver}</div>
+                        <div>Assistant: {v.assistant}</div>
+                        {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
+                        {v.movementState && <div>Bus Movement: {v.movementState}</div>}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
+            </MapContainer>
         </div>
       </main>
     </div>
