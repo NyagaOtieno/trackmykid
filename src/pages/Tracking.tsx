@@ -1,130 +1,107 @@
-import { useState, useEffect, useMemo } from "react";
+// Tracking.tsx — Admin live vehicle tracking
+// ✅ Calls /tracking/live-locations (NOT /tracking/bus-locations which is history)
+// ✅ Map does NOT jump on every poll — only flies when user explicitly clicks a vehicle
+// ✅ Playback (history) uses getBusLocationHistory separately
+
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import "leaflet/dist/leaflet.css";
-import { getBusLocations } from "./api";
+import { getLiveLocations } from "./api";
 import { createBusIcon } from "@/utils/vehicleIcon";
 
-// ---------------- Fly to selected vehicle ----------------
-function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
+// ── FlyTo: only fires when userSelected changes (not on every poll) ──
+function FlyToLocation({ target }: { target: { lat: number; lng: number } | null }) {
   const map = useMap();
+  const prevRef = useRef<string>("");
   useEffect(() => {
-    if (selectedVehicle?.lat != null && selectedVehicle?.lng != null) {
-      map.flyTo([selectedVehicle.lat, selectedVehicle.lng], 15, { animate: true });
-    }
-  }, [selectedVehicle, map]);
-
+    if (!target) return;
+    const key = `${target.lat.toFixed(5)},${target.lng.toFixed(5)}`;
+    if (key === prevRef.current) return; // same coords — don't fly again
+    prevRef.current = key;
+    map.flyTo([target.lat, target.lng], 15, { animate: true, duration: 1 });
+  }, [target, map]);
   return null;
 }
 
-// ---------------- Coordinate Normalizer ----------------
-function normalizeCoordinates(v: any) {
-  let lat = v.lat !== null ? Number(v.lat) : null;
-  let lng = v.lng !== null ? Number(v.lng) : null;
-  let fallback = false;
+// ── Coordinate validator ──
+function normalizeCoords(v: any) {
+  let lat = v.lat != null ? Number(v.lat) : null;
+  let lng = v.lng != null ? Number(v.lng) : null;
 
-  // Case: Missing GPS
-  if (lat === null || lng === null) {
-    return { ...v, lat: -1.2921, lng: 36.8219, __fallback: true };
-  }
+  if (lat === null || lng === null) return { ...v, lat: -1.2921, lng: 36.8219, __fallback: true };
+  if (lat > 5 && lng < 5) [lat, lng] = [lng, lat]; // swapped
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180)   return { ...v, lat: -1.2921, lng: 36.8219, __fallback: true };
+  const inKenya = lat > -5 && lat < 5 && lng > 34 && lng < 42;
+  if (!inKenya) return { ...v, lat: -1.2921, lng: 36.8219, __fallback: true };
 
-  // Case: Swapped (36.x, -1.x)
-  if (lat > 5 && lng < 5) {
-    [lat, lng] = [lng, lat];
-  }
-
-  // Teltonika case: sends huge numbers sometimes → drop them
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    fallback = true;
-    lat = -1.2921;
-    lng = 36.8219;
-  }
-
-  // Kenya bounds check
-  const kenyaLat = lat > -5 && lat < 5;
-  const kenyaLng = lng > 34 && lng < 42;
-
-  if (!kenyaLat || !kenyaLng) {
-    fallback = true;
-    lat = -1.2921;
-    lng = 36.8219;
-  }
-
-  return {
-    ...v,
-    lat,
-    lng,
-    __fallback: fallback,
-    direction: Number(v.direction || 0),
-    speed: Number(v.speed || 0),
-  };
+  return { ...v, lat, lng, direction: Number(v.direction || 0), speed: Number(v.speed || 0), __fallback: false };
 }
 
-// ---------------- Fetch and Fix Bus Coordinates ----------------
-// Uses the shared `api` client (baseURL from env, auth header + 401
-// interceptor, 15s timeout, and unwrap() to guarantee an array back
-// no matter what shape the backend responds with). Previously this
-// called axios directly with a hardcoded URL and no timeout, which is
-// what caused the page to hang forever on a slow response and crash
-// with "buses.filter is not a function" when the response shape
-// wasn't exactly { data: [...] }.
-async function getBuses() {
+async function fetchLiveVehicles() {
   try {
-    const buses = await getBusLocations();
-    return (Array.isArray(buses) ? buses : []).map((v: any) => normalizeCoordinates(v));
-  } catch (e) {
-    console.error("Error fetching buses:", e);
+    const data = await getLiveLocations(); // ← /tracking/live-locations (NOT history)
+    return (Array.isArray(data) ? data : []).map(normalizeCoords);
+  } catch {
     return [];
   }
 }
 
-// ---------------- Main Component ----------------
 export default function Tracking() {
-  const { data: buses = [], isLoading, refetch } = useQuery({
-    queryKey: ["buses"],
-    queryFn: getBuses,
-    refetchInterval: 5000,
-    retry: 2, // don't let a flaky/erroring endpoint retry-loop forever
+  const { data: vehicles = [], isLoading, refetch, dataUpdatedAt } = useQuery({
+    queryKey: ["liveLocations"],
+    queryFn:  fetchLiveVehicles,
+    refetchInterval: 5000,  // poll every 5s
+    retry: 2,
+    staleTime: 4000,         // don't refetch more than once per 4s
   });
 
   const [search, setSearch] = useState("");
-  const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
+  // userSelectedId: only set when user CLICKS a vehicle — never auto-set by poll
+  const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
 
-  // Defensive: getBuses() always resolves to an array, but guard here too
-  // so a bad cache value can never crash this component again.
-  const busList = Array.isArray(buses) ? buses : [];
+  const list = Array.isArray(vehicles) ? vehicles : [];
 
-  const filteredLocations = useMemo(() => {
-    return busList.filter((v: any) =>
-      v.plateNumber?.toLowerCase().includes(search.toLowerCase())
-    );
-  }, [busList, search]);
+  const filtered = useMemo(() =>
+    list.filter((v: any) =>
+      v.plateNumber?.toLowerCase().includes(search.toLowerCase()) ||
+      v.vehicleReg?.toLowerCase().includes(search.toLowerCase())
+    ),
+  [list, search]);
 
-  // Auto-center on a valid real location
-  useEffect(() => {
-    const realBus = filteredLocations.find((v) => !v.__fallback);
-    setSelectedVehicle(realBus || filteredLocations[0] || null);
-  }, [filteredLocations]);
+  // Fly-to target: only the user-selected vehicle, never auto-selected
+  const selectedVehicle = userSelectedId
+    ? filtered.find((v: any) => String(v.busId ?? v.vehicleReg) === userSelectedId) ?? null
+    : null;
+  const flyTarget = selectedVehicle && !selectedVehicle.__fallback
+    ? { lat: selectedVehicle.lat, lng: selectedVehicle.lng }
+    : null;
 
-  const center: [number, number] = selectedVehicle
-    ? [selectedVehicle.lat, selectedVehicle.lng]
-    : [-1.2921, 36.8219];
+  const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "—";
+  const liveCount  = filtered.filter((v: any) => !v.__fallback).length;
 
   if (isLoading)
-    return <div className="flex items-center justify-center h-[600px]">Loading map...</div>;
+    return <div className="flex items-center justify-center h-[600px] text-muted-foreground">Loading live map...</div>;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
-          <p className="text-muted-foreground mt-1">Real-time tracking for all vehicles</p>
+          <p className="text-muted-foreground mt-1">
+            Real-time positions from GPS devices · auto-refreshes every 5s
+          </p>
         </div>
-        <div className="text-sm text-muted-foreground">
-          Last update: {new Date().toLocaleTimeString()}
+        <div className="flex items-center gap-3">
+          <Badge variant="outline" className="text-xs">
+            {liveCount} / {filtered.length} with live GPS
+          </Badge>
+          <span className="text-xs text-muted-foreground">Updated: {lastUpdate}</span>
+          <Button size="sm" onClick={() => refetch()}>Refresh Now</Button>
         </div>
       </div>
 
@@ -136,68 +113,93 @@ export default function Tracking() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-sm"
         />
-        <Button onClick={() => refetch()}>Refresh</Button>
+        {userSelectedId && (
+          <Button variant="ghost" size="sm" onClick={() => setUserSelectedId(null)}>
+            Clear selection
+          </Button>
+        )}
       </div>
 
       {/* Map */}
-      <div className="bg-card rounded-lg border overflow-hidden h-[600px]">
-        <MapContainer center={center} zoom={12} style={{ height: "100%", width: "100%" }}>
+      <div className="bg-card rounded-lg border overflow-hidden" style={{ height: 520 }}>
+        <MapContainer center={[-1.2921, 36.8219]} zoom={11} style={{ height: "100%", width: "100%" }}>
           <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
+            attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {filteredLocations.map((bus) => (
-            <Marker
-              key={bus.busId}
-              position={[bus.lat, bus.lng]}
-              icon={createBusIcon(bus, selectedVehicle?.busId === bus.busId)}
-              eventHandlers={{ click: () => setSelectedVehicle(bus) }}
-            >
-              <Popup>
-                <div className="p-2">
-                  <h3 className="font-bold">{bus.plateNumber}</h3>
-                  <p>Lat: {bus.lat.toFixed(5)}</p>
-                  <p>Lng: {bus.lng.toFixed(5)}</p>
-                  <p>Movement: {bus.movementState}</p>
-                  <p>Driver: {bus.driver?.name || "N/A"}</p>
-                  <p>Assistant: {bus.assistant?.name || "N/A"}</p>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
+          {/* Only flies when user clicks — not on every poll */}
+          <FlyToLocation target={flyTarget} />
 
-          <FlyToLocation selectedVehicle={selectedVehicle} />
+          {filtered.map((bus: any) => {
+            const id = String(bus.busId ?? bus.vehicleReg);
+            return (
+              <Marker
+                key={id}
+                position={[bus.lat, bus.lng]}
+                icon={createBusIcon(bus, userSelectedId === id)}
+                eventHandlers={{ click: () => setUserSelectedId(id) }}
+              >
+                <Popup>
+                  <div className="space-y-1 text-sm">
+                    <p className="font-bold">{bus.plateNumber ?? bus.vehicleReg}</p>
+                    {bus.__fallback && (
+                      <p className="text-orange-500 text-xs">⚠ No GPS signal — showing default location</p>
+                    )}
+                    <p>Speed: {bus.speed ?? 0} km/h</p>
+                    <p>Direction: {bus.direction ?? 0}°</p>
+                    <p>State: {bus.movementState ?? "—"}</p>
+                    {bus.driver?.name && <p>Driver: {bus.driver.name}</p>}
+                    {bus.assistant?.name && <p>Assistant: {bus.assistant.name}</p>}
+                    {bus.lastUpdate && (
+                      <p className="text-xs text-muted-foreground">
+                        GPS: {new Date(bus.lastUpdate).toLocaleTimeString()}
+                      </p>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
         </MapContainer>
       </div>
 
-      {/* Vehicle List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredLocations.map((bus) => (
-          <div
-            key={bus.busId}
-            className={`bg-card border rounded-lg p-4 cursor-pointer hover:bg-accent ${
-              selectedVehicle?.busId === bus.busId ? "border-primary" : ""
-            }`}
-            onClick={() => setSelectedVehicle(bus)}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">{bus.plateNumber}</h3>
-                <p className="text-sm text-muted-foreground">Driver: {bus.driver?.name}</p>
+      {/* Vehicle cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filtered.length === 0 ? (
+          <p className="col-span-full text-center text-muted-foreground py-8">
+            No vehicles found. Check that the GPS listener is running and devices are registered.
+          </p>
+        ) : filtered.map((bus: any) => {
+          const id  = String(bus.busId ?? bus.vehicleReg);
+          const sel = userSelectedId === id;
+          return (
+            <div
+              key={id}
+              className={`bg-card border rounded-lg p-4 cursor-pointer transition-all hover:border-primary ${sel ? "border-primary ring-1 ring-primary" : ""}`}
+              onClick={() => setUserSelectedId(sel ? null : id)}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold text-sm">{bus.plateNumber ?? bus.vehicleReg}</span>
+                <span className={`h-2.5 w-2.5 rounded-full ${
+                  bus.__fallback ? "bg-gray-400"
+                  : (bus.speed ?? 0) > 0 ? "bg-green-500 animate-pulse"
+                  : "bg-yellow-400"
+                }`} />
               </div>
-              <div
-                className={`h-3 w-3 rounded-full ${
-                  bus.__fallback
-                    ? "bg-gray-500"
-                    : bus.movementState?.toLowerCase() === "standing"
-                    ? "bg-green-500"
-                    : "bg-red-500"
-                }`}
-              />
+              <p className="text-xs text-muted-foreground">Driver: {bus.driver?.name ?? "—"}</p>
+              <p className="text-xs text-muted-foreground">
+                {bus.__fallback ? "No GPS signal"
+                  : `${bus.speed ?? 0} km/h · ${bus.movementState ?? "unknown"}`}
+              </p>
+              {!bus.__fallback && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">
+                  {bus.lat.toFixed(4)}, {bus.lng.toFixed(4)}
+                </p>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
