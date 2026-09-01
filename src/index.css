@@ -122,15 +122,18 @@ All colors MUST be HSL.
   }
 }
 
-/* Ensure Leaflet map stays below dialogs and modals */
-.leaflet-container,
-.leaflet-pane,
-.leaflet-map-pane,
-.leaflet-tile-pane,
-.leaflet-overlay-pane,
-.leaflet-shadow-pane,
-.leaflet-marker-pane,
-.leaflet-tooltip-pane,
-.leaflet-popup-pane {
-  z-index: 400 !important;
+/* Leaflet's internal panes/controls use z-index up to 1000 (tile pane
+   200, marker pane 600, popup pane 700, .leaflet-control 1000). Since
+   .leaflet-container only gets `position: relative` (no z-index) it
+   never forms its own stacking context, so those high z-indices were
+   comparing directly against the rest of the app — including the
+   mobile sidebar drawer (z-50) — and the map controls/tiles could
+   paint on top of it, which is why the mobile menu looked
+   "transparent"/unreadable on the tracking pages. Pinning a z-index
+   on the container (any value + its own `position`) contains all of
+   Leaflet's internal z-indices inside it, well below app UI like the
+   mobile nav (z-50), dialogs, and toasts (z-50/100).
+   https://leafletjs.com/reference.html#control (see z-index note) */
+.leaflet-container {
+  z-index: 0;
 }

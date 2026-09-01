@@ -14,14 +14,12 @@ import {
 import { getDrivers, getBuses, updateUser, deleteUser } from '@/lib/api';
 import AddDriverForm from './AddDriverForm';
 import EditDriverForm from './EditDriverForm';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 interface Driver {
   id: number;
   name: string;
   email?: string;
   phone?: string;
-  schoolId?: number;
 }
 
 interface Bus {
@@ -35,7 +33,6 @@ export default function Drivers() {
   const [searchTerm, setSearchTerm] = useState('');
   const [addingDriver, setAddingDriver] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Driver | null>(null);
   const queryClient = useQueryClient();
 
   const { data: drivers = [], isLoading: driversLoading } = useQuery<Driver[]>({
@@ -69,23 +66,19 @@ export default function Drivers() {
     );
   });
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
+  const handleDelete = async (driver: Driver) => {
+    if (!confirm(`Are you sure you want to delete ${driver.name}?`)) return;
     try {
-      await deleteUser(deleteTarget.id);
+      await deleteUser(driver.id);
       queryClient.invalidateQueries(['drivers']);
-      setDeleteTarget(null);
+      alert(`${driver.name} deleted successfully`);
     } catch (err) {
       console.error(err);
       alert('Failed to delete driver');
     }
   };
 
-  const handleUpdate = async (data?: Driver & { password?: string; schoolId?: number }) => {
-    if (!data) {
-      setEditingDriver(null);
-      return;
-    }
+  const handleUpdate = async (data: Driver & { password?: string }) => {
     try {
       await updateUser(data.id, data);
       queryClient.invalidateQueries(['drivers']);
@@ -186,7 +179,7 @@ export default function Drivers() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => setDeleteTarget(driver)}
+                      onClick={() => handleDelete(driver)}
                     >
                       <Trash className="h-4 w-4 mr-1" />
                       Delete
@@ -220,25 +213,6 @@ export default function Drivers() {
           </div>
         </div>
       )}
-
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete driver</DialogTitle>
-            <DialogDescription>
-              {deleteTarget ? `Are you sure you want to delete "${deleteTarget.name}"? This cannot be undone.` : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

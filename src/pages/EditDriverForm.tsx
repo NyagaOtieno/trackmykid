@@ -11,9 +11,8 @@ import {
 import { getSchools, updateUser } from '@/lib/api';
 
 interface EditDriverFormProps {
-  driver: { id: number; name: string; email?: string; phone?: string; schoolId?: number };
-  onUpdated: (data?: { id: number; name: string; email?: string; phone?: string; password?: string; schoolId?: number }) => void;
-  onCancel?: () => void;
+  driver: { id: number; name: string; email?: string; phone?: string; schoolId: number };
+  onUpdated: () => void;
 }
 
 interface School {
@@ -21,12 +20,12 @@ interface School {
   name: string;
 }
 
-export default function EditDriverForm({ driver, onUpdated, onCancel }: EditDriverFormProps) {
+export default function EditDriverForm({ driver, onUpdated }: EditDriverFormProps) {
   const [name, setName] = useState(driver.name);
   const [email, setEmail] = useState(driver.email || '');
   const [phone, setPhone] = useState(driver.phone || '');
   const [password, setPassword] = useState('');
-  const [schoolId, setSchoolId] = useState(driver.schoolId ?? 0);
+  const [schoolId, setSchoolId] = useState(driver.schoolId);
   const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -39,17 +38,14 @@ export default function EditDriverForm({ driver, onUpdated, onCancel }: EditDriv
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = {
-        id: driver.id,
+      await updateUser(driver.id, {
         name,
         email,
         phone,
         schoolId,
         ...(password ? { password } : {}),
-      };
-
-      await updateUser(driver.id, payload);
-      onUpdated(payload);
+      });
+      onUpdated();
     } catch (err) {
       console.error(err);
       alert('Failed to update driver');
@@ -96,7 +92,7 @@ export default function EditDriverForm({ driver, onUpdated, onCancel }: EditDriv
         />
       </div>
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={() => (onCancel ? onCancel() : onUpdated())}>
+        <Button type="button" variant="outline" onClick={onUpdated}>
           Cancel
         </Button>
         <Button type="submit" disabled={loading}>

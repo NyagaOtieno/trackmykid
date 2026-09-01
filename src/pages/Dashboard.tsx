@@ -6,7 +6,6 @@ import { Loader2, Bus, Users, ClipboardList, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
-import { createBusIcon } from "@/utils/vehicleIcon";
 
 /**
  * Dashboard (single-file)
@@ -19,35 +18,44 @@ import { createBusIcon } from "@/utils/vehicleIcon";
  */
 
 // === CONFIG ===
-const TRACK_API_BASE = "https://mytrack-production.up.railway.app";
+const TRACK_API_BASE = "https://tmk-api.joshpitah.co.ke";
 const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 // --- API calls (existing endpoints kept) ---
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const getStudents = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/students"
+    "https://tmk-api.joshpitah.co.ke/api/students",
+    { headers: authHeaders() }
   );
   return data.data || [];
 };
 
 const getBuses = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/buses"
+    "https://tmk-api.joshpitah.co.ke/api/buses",
+    { headers: authHeaders() }
   );
   return data || [];
 };
 
 const getManifests = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/manifests"
+    "https://tmk-api.joshpitah.co.ke/api/manifests",
+    { headers: authHeaders() }
   );
   return data.data || [];
 };
 
 const getUsers = async () => {
   const { data } = await axios.get(
-    "https://schooltransport-production.up.railway.app/api/users"
+    "https://tmk-api.joshpitah.co.ke/api/users",
+    { headers: authHeaders() }
   );
   return data.data || [];
 };
@@ -127,6 +135,12 @@ const getLocationFromLatLon = async (lat: number, lon: number) => {
   }
 };
 
+// --- Leaflet bus icon ---
+const busIcon = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61222.png",
+  iconSize: [30, 30],
+  iconAnchor: [15, 30],
+});
 
 export default function Dashboard() {
   // UI state
@@ -168,14 +182,10 @@ export default function Dashboard() {
   const { data: devicesData = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
     queryKey: ["track-devices"],
     queryFn: getDevices,
+    onSuccess: (d) => {
+      setDevices(d || []);
+    },
   });
-
-  // Sync devicesData to devices state
-  useEffect(() => {
-    if (devicesData) {
-      setDevices(devicesData || []);
-    }
-  }, [devicesData]);
 
   // Map driverId -> driver object
   useEffect(() => {
@@ -431,37 +441,37 @@ export default function Dashboard() {
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 w-full">
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
-            <CardHeader className="flex justify-between pb-1">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <Card className="shadow-md hover:shadow-lg transition-all">
+            <CardHeader className="flex justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Students</CardTitle>
               <Users className="w-5 h-5 text-blue-600" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{students.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Enrolled across all buses</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{students.length}</div>
+              <p className="text-xs text-muted-foreground">Enrolled across all buses</p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
-            <CardHeader className="flex justify-between pb-1">
+          <Card className="shadow-md hover:shadow-lg transition-all">
+            <CardHeader className="flex justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Buses</CardTitle>
               <Bus className="w-5 h-5 text-green-600" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{buses.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Active in your school fleet</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{buses.length}</div>
+              <p className="text-xs text-muted-foreground">Active in your school fleet</p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-md hover:shadow-lg transition-all h-auto sm:h-44 flex flex-col justify-between">
-            <CardHeader className="flex justify-between pb-1">
+          <Card className="shadow-md hover:shadow-lg transition-all">
+            <CardHeader className="flex justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Today's Trips</CardTitle>
               <ClipboardList className="w-5 h-5 text-orange-600" />
             </CardHeader>
-            <CardContent className="pt-0 space-y-2">
-              <div className="text-3xl font-bold leading-tight">{todaysManifests.length}</div>
-              <p className="text-xs text-muted-foreground leading-snug">Trip manifests recorded today</p>
+            <CardContent>
+              <div className="text-3xl font-bold">{todaysManifests.length}</div>
+              <p className="text-xs text-muted-foreground">Trip manifests recorded today</p>
             </CardContent>
           </Card>
         </div>
@@ -475,7 +485,7 @@ export default function Dashboard() {
           placeholder="Search students..."
           value={studentSearch}
           onChange={(e) => setStudentSearch(e.target.value)}
-          className="mb-2 p-2 border rounded w-1/2"
+          className="mb-2 p-2 border rounded w-full"
         />
         {paginatedStudents.length > 0 ? (
           <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
@@ -492,7 +502,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {paginatedStudents.map((s: any, idx: number) => (
+                {paginatedStudents.map((s, idx) => (
                   <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50 transition">
                     <td className="py-2 px-3">{(studentPage - 1) * rowsPerPage + idx + 1}</td>
                     <td className="py-2 px-3">{s.name}</td>
@@ -556,7 +566,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {paginatedTrips.map((trip: any, idx: number) => (
+                {paginatedTrips.map((trip, idx) => (
                   <tr key={trip.id} className="border-b last:border-0 hover:bg-gray-50 transition">
                     <td className="py-2 px-3">{(tripPage - 1) * rowsPerPage + idx + 1}</td>
                     <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
@@ -655,17 +665,8 @@ export default function Dashboard() {
 
             if (!lat || !lon) return null;
 
-            // Create vehicle-like object for icon creation
-            const vehicleData = {
-              lat,
-              lng: lon,
-              plateNumber: m.bus?.plateNumber || m.bus?.registration || m.bus?.name || "N/A",
-              movementState: m.status === "CHECKED_IN" ? "moving" : "standing",
-              direction: 0,
-            };
-
             return (
-              <Marker key={m.id} position={[lat, lon]} icon={createBusIcon(vehicleData, false)}>
+              <Marker key={m.id} position={[lat, lon]} icon={busIcon}>
                 <Popup>
                   <strong>Bus:</strong> {m.bus?.name || "N/A"} <br />
                   <strong>Driver:</strong> {driversMap[m.bus?.driverId]?.name || "N/A"} <br />

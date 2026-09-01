@@ -1,21 +1,7 @@
 // ParentPortal.tsx
 import { useQuery } from "@tanstack/react-query";
-import {
-  MapPin,
-  Car,
-  Gauge,
-  Navigation,
-  Clock,
-  User,
-  UserCog,
-  X,
-  AlertCircle,
-  ShieldAlert,
-  ChevronUp,
-  ChevronDown,
-} from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import { useMap } from "react-leaflet";
+import { MapPin, Bus } from "lucide-react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import {
   Card,
   CardContent,
@@ -23,17 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -43,14 +18,15 @@ import {
 } from "@/components/ui/select";
 import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useMemo, useEffect, useState, useRef } from "react";
+import { useMemo, useEffect, useState } from "react";
+// Same icon builder Tracking.tsx (admin) uses, so parent and admin
+// render the identical bus marker instead of the old mismatched
+// flaticon PNGs (which also had inverted moving/stopped colors).
 import { createBusIcon } from "@/utils/vehicleIcon";
 
-
-/* ---------------- AUTO-FIT MAP BOUNDS ---------------- */
+/* ---------------- Auto-fit map bounds component ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   const map = useMap();
   useEffect(() => {
@@ -59,34 +35,38 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   return null;
 }
 
-/* ---------------- Fly to selected vehicle ---------------- */
-function FlyToLocation({ selectedVehicle }: { selectedVehicle: any }) {
+/* ---------------- Fly to the selected child's bus ---------------- */
+// Zooms in on the selected student's live position, but only when
+// they're actually onboard (has a lat/lon) — the backend/UI already
+// hide location entirely otherwise, so there's nothing to zoom to.
+function FocusOnSelected({ target }: { target: { lat: number; lon: number } | null }) {
   const map = useMap();
   useEffect(() => {
-    if (selectedVehicle?.lat != null && selectedVehicle?.lng != null) {
-      map.flyTo([selectedVehicle.lat, selectedVehicle.lng], 15, { animate: true, duration: 1.5 });
-    }
-  }, [selectedVehicle, map]);
+    if (target) map.flyTo([target.lat, target.lon], 16, { duration: 1 });
+  }, [target, map]);
   return null;
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
-const API_BASE = import.meta.env.VITE_API_URL ?? "https://schooltransport-production.up.railway.app/api";
-
+const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
 const STUDENTS_ENDPOINT = `${API_BASE}/students`;
 const MANIFESTS_ENDPOINT = `${API_BASE}/manifests`;
 const BUSES_ENDPOINT = `${API_BASE}/buses`;
-const USERS_ENDPOINT = `${API_BASE}/users`; // Fixed this from /tracking/bus-locations
-const PANIC_ENDPOINT = `${API_BASE}/panic`;
+const USERS_ENDPOINT = `${API_BASE}/users`;
+// Secure, tenant-scoped, onboard-only per-child tracking endpoint.
+// Returns { tripStatus: "ONBOARD" | ..., location: { lat, lng, movementState, lastUpdate } | null }
+const studentTrackingUrl = (studentId: number | string) =>
+  `${API_BASE}/tracking/student/${studentId}`;
 
-// Use the specific tracking environment variables
-const TRACK_BASE = import.meta.env.VITE_API_URL_TRACK ?? "https://mytrack-production.up.railway.app/api";
-const BUS_LOCATIONS_API = `${TRACK_BASE}/devices/list`;
-const TRACKING_KEY = import.meta.env.VITE_PUBLIC_MYTRACK;
+// ✅ Login.tsx stores the session token under localStorage "token" —
+// keep every fetch in this file consistent with that.
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
-
 type Manifest = {
   id: number;
   studentId: number;
@@ -98,10 +78,10 @@ type Manifest = {
   boardingTime?: string | null;
   alightingTime?: string | null;
   status?: string | null;
+  session?: string | null;
   student?: any;
   bus?: any;
 };
-
 type BusItem = {
   id: number;
   name?: string;
@@ -112,401 +92,22 @@ type BusItem = {
   driver?: any | null;
   assistant?: any | null;
 };
-
-type UserItem = {
-  id: number;
-  name?: string;
-  role?: string;
-  phone?: string | null;
-};
-
+type UserItem = { id: number; name?: string; role?: string; phone?: string | null };
 type DeviceItem = {
-  ID: number;
-  IMEI?: string;
-  SIM?: string;
-  VehicleNo?: string;
-  ChassisNo?: string;
-  LastLat?: number;
-  LastLng?: number;
+  busId: number;
+  plateNumber?: string;
+  lat?: number | null;
+  lng?: number | null;
+  movementState?: string | null;
   lastUpdate?: string;
-  movementState?: string;
+  [k: string]: any;
 };
-
-type StudentView = {
-  student: Student;
-  manifest?: Manifest | undefined;
-  status: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN";
-  lat?: number;
-  lon?: number;
-  readableLocation: string;
-  busName?: string;
-  plate?: string;
-  driver?: string;
-  assistant?: string;
-  lastSeen?: string;
-  liveSource?: "device" | "manifest" | "student";
-  movementState?: string;
-};
-
-type VehicleView = {
-  plateNumber: string;
-  busName: string;
-  lat?: number;
-  lng?: number;
-  driver?: string;
-  assistant?: string;
-  lastSeen?: string;
-  movementState?: string;
-  readableLocation: string;
-  students: StudentView[];
-};
-
-/* ---------------- Vehicle Details Card Component (Persistent Sidebar) ---------------- */
-function VehicleDetailsCard({ 
-  vehicle, 
-  students,
-  parentId,
-  showPanicButton = true,
-  onPanicClick,
-  panicTrigger,
-  variant = "full",
-}: { 
-  vehicle: VehicleView | null; 
-  students: StudentView[];
-  parentId?: number | null;
-  showPanicButton?: boolean;
-  onPanicClick?: () => void;
-  panicTrigger?: number;
-  variant?: "full" | "sheet";
-}) {
-  const [showPanicDialog, setShowPanicDialog] = useState(false);
-  const [panicReason, setPanicReason] = useState("");
-  const [isSubmittingPanic, setIsSubmittingPanic] = useState(false);
-
-  useEffect(() => {
-    if (panicTrigger !== undefined && panicTrigger > 0) {
-      setShowPanicDialog(true);
-    }
-  }, [panicTrigger]);
-
-  const handlePanicSubmit = async () => {
-    if (!panicReason || !vehicle || !parentId) {
-      toast.error("Please select a reason for the panic alert");
-      return;
-    }
-
-    // Get first student from vehicle's students array
-    const firstStudent = vehicle.students[0];
-    if (!firstStudent) {
-      toast.error("No student found on this vehicle");
-      return;
-    }
-
-    setIsSubmittingPanic(true);
-    try {
-      const token = sessionStorage.getItem("token") || localStorage.getItem("token");
-      const response = await fetch(PANIC_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          studentId: firstStudent.student.id,
-          parentId: parentId,
-          reason: panicReason,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "Failed to send panic alert" }));
-        throw new Error(errorData.message || "Failed to send panic alert");
-      }
-
-      toast.success("Panic sent! Help is being notified.");
-      setShowPanicDialog(false);
-      setPanicReason("");
-    } catch (error: any) {
-      toast.error(error.message || "Failed to send panic alert. Please try again.");
-    } finally {
-      setIsSubmittingPanic(false);
-    }
-  };
-
-  if (!vehicle) {
-    return (
-      <Card className="w-full border shadow-md flex items-center justify-center min-h-[150px]">
-        <CardContent className="text-center p-3 sm:p-4">
-          <Car className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground mx-auto mb-2 opacity-50" />
-          <p className="text-xs sm:text-sm text-muted-foreground">Select a student to view vehicle details</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const movementState = vehicle.movementState?.toLowerCase() || "unknown";
-  const isFallback = !vehicle.lat || !vehicle.lng;
-  const isMoving = movementState === "moving" || movementState === "driving";
-  
-  const statusColor = isFallback
-    ? "bg-gray-500"
-    : isMoving
-    ? "bg-green-500"
-    : "bg-blue-500";
-
-  const statusText = isFallback
-    ? "No GPS Signal"
-    : isMoving
-    ? "Moving"
-    : "Stopped";
-
-  const vehicleStudents = students.filter(s => s.plate === vehicle.plateNumber);
-
-  return (
-    <>
-      <Card className="w-full border shadow-md">
-        {variant === "full" && (
-          <CardHeader className={`${statusColor} text-white rounded-t p-2 sm:p-4 lg:p-6`}>
-            <div className="flex items-center justify-between flex-wrap gap-1.5">
-              <CardTitle className="text-sm sm:text-base lg:text-lg font-semibold flex items-center gap-1.5">
-                <Car className="h-4 w-4 sm:h-5 sm:w-5" />
-                {vehicle.plateNumber || "N/A"}
-              </CardTitle>
-              <Badge variant="secondary" className="bg-white/20 text-white border-white/30 text-[10px] sm:text-xs">
-                {statusText}
-              </Badge>
-            </div>
-          </CardHeader>
-        )}
-        <CardContent className={`p-2 sm:p-3 lg:p-6 space-y-2 sm:space-y-3 lg:space-y-4 ${variant === "sheet" ? "pt-3" : ""}`}>
-        {/* Vehicle Information */}
-        {variant === "full" && (
-          <div className="space-y-2">
-            <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Vehicle Information</h3>
-            
-            {vehicle.busName && vehicle.busName !== "No Bus Assigned" && (
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-primary/10 rounded">
-                  <Car className="h-3 w-3 text-primary" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground">Vehicle Name</p>
-                  <p className="font-medium text-xs sm:text-sm">{vehicle.busName}</p>
-                </div>
-              </div>
-            )}
-
-            {variant === "full" && vehicle.plateNumber && (
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-primary/10 rounded">
-                  <Navigation className="h-3 w-3 text-primary" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground">Plate Number</p>
-                  <p className="font-medium text-sm sm:text-base">{vehicle.plateNumber}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Staff Information */}
-        <div className="space-y-2 pt-2 border-t">
-          <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Staff</h3>
-          
-          {vehicle.driver && vehicle.driver !== "N/A" && (
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-primary/10 rounded">
-                <User className="h-3 w-3 text-primary" />
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground">Driver</p>
-                <p className="font-medium text-xs sm:text-sm">{vehicle.driver}</p>
-              </div>
-            </div>
-          )}
-
-          {vehicle.assistant && vehicle.assistant !== "N/A" && (
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-primary/10 rounded">
-                <UserCog className="h-3 w-3 text-primary" />
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground">Assistant</p>
-                <p className="font-medium text-xs sm:text-sm">{vehicle.assistant}</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Location Information */}
-        {vehicle.lat && vehicle.lng && (
-          <div className="space-y-2 pt-2 border-t">
-            <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Location</h3>
-            
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-primary/10 rounded">
-                <MapPin className="h-3 w-3 text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-muted-foreground">Current Location</p>
-                <p className="font-medium text-xs sm:text-sm truncate">{vehicle.readableLocation || "Location unavailable"}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <div>
-                <p className="text-muted-foreground">Latitude</p>
-                <p className="font-medium text-xs">{vehicle.lat.toFixed(6)}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Longitude</p>
-                <p className="font-medium text-xs">{vehicle.lng.toFixed(6)}</p>
-              </div>
-            </div>
-
-            {vehicle.lastSeen && (
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-primary/10 rounded">
-                  <Clock className="h-3 w-3 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-muted-foreground">Last Update</p>
-                  <p className="font-medium text-xs truncate">{new Date(vehicle.lastSeen).toLocaleString()}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Students on Vehicle */}
-        {vehicleStudents.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t">
-            <h3 className="font-semibold text-xs sm:text-sm border-b pb-1">Students on Vehicle</h3>
-            <div className="space-y-1">
-              {vehicleStudents.map((sv) => (
-                <div key={sv.student.id} className="flex items-center gap-1.5 p-1.5 bg-muted/50 rounded">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-xs sm:text-sm truncate">{sv.student.name}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {sv.status === "CHECKED_IN" ? "On Board" : sv.status === "CHECKED_OUT" ? "Checked Out" : "Unknown"}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Panic Button */}
-        {showPanicButton && (
-          <div className="pt-2 border-t">
-            <Button
-              onClick={() => {
-                onPanicClick?.();
-                setShowPanicDialog(true);
-              }}
-              variant="destructive"
-              className="w-full h-9 sm:h-10 text-xs sm:text-sm font-semibold"
-              size="sm"
-            >
-              <AlertCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5" />
-              <span>Emergency</span>
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-
-    {/* Panic Dialog */}
-    <Dialog open={showPanicDialog} onOpenChange={setShowPanicDialog}>
-      <DialogContent className="max-w-md">
-        <DialogHeader className="text-left">
-          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl">
-            <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 text-destructive flex-shrink-0" />
-            <span>Emergency Panic Alert</span>
-          </DialogTitle>
-          <DialogDescription className="text-sm sm:text-base mt-2 text-left">
-            Please select a reason for this emergency alert. Help will be notified immediately.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <label htmlFor="panic-reason" className="text-sm font-medium block">
-              Reason for Panic
-            </label>
-            <Select value={panicReason} onValueChange={setPanicReason}>
-              <SelectTrigger 
-                id="panic-reason" 
-                className="w-full h-11 sm:h-10 text-base sm:text-sm"
-              >
-                <SelectValue placeholder="Select a reason" />
-              </SelectTrigger>
-              <SelectContent 
-                className="max-h-[60vh] sm:max-h-[200px] !z-[10001]"
-                position="popper"
-              >
-                <SelectItem value="Emergency" className="text-base sm:text-sm py-3 sm:py-2">
-                  Emergency
-                </SelectItem>
-                <SelectItem value="Accident" className="text-base sm:text-sm py-3 sm:py-2">
-                  Accident
-                </SelectItem>
-                <SelectItem value="Medical Issue" className="text-base sm:text-sm py-3 sm:py-2">
-                  Medical Issue
-                </SelectItem>
-                <SelectItem value="Other" className="text-base sm:text-sm py-3 sm:py-2">
-                  Other
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0 sm:justify-end">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setShowPanicDialog(false);
-              setPanicReason("");
-            }}
-            disabled={isSubmittingPanic}
-            className="w-full sm:w-auto order-2 sm:order-1"
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={handlePanicSubmit}
-            disabled={!panicReason || isSubmittingPanic}
-            className="w-full sm:w-auto order-1 sm:order-2"
-          >
-            {isSubmittingPanic ? (
-              <>
-                <span className="inline-block animate-spin mr-2">⏳</span>
-                Sending...
-              </>
-            ) : (
-              <>
-                <AlertCircle className="h-4 w-4 mr-2" />
-                Send Panic Alert
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    </>
-  );
-}
 
 export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
-  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
-  // Mobile bottom sheet expansion state (collapsed by default to keep map primary)
-  const [showMobileDetails, setShowMobileDetails] = useState(false);
-  const [panicTriggerKey, setPanicTriggerKey] = useState(0);
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("all");
 
   const handleLogout = () => {
     localStorage.removeItem("parent");
@@ -514,156 +115,182 @@ export default function ParentPortal() {
     navigate("/");
   };
 
-  const triggerPanic = () => {
-    setPanicTriggerKey((k) => k + 1);
-    setShowMobileDetails(true);
-  };
-
   /* ---------------- FETCH DATA ---------------- */
   const { data: studentsData, isLoading: loadingStudents } = useQuery({
     queryKey: ["students"],
     queryFn: async () => {
-      const res = await fetch(STUDENTS_ENDPOINT);
+      const res = await fetch(STUDENTS_ENDPOINT, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch students");
       const json = await res.json();
-      return Array.isArray(json) ? json : json?.data ?? [];
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
     refetchInterval: 15000,
   });
-
-  const students: Student[] = studentsData ?? [];
-
+  const students: Student[] = Array.isArray(studentsData) ? studentsData : [];
   const myStudents = students.filter(
     (s: any) =>
       (s.parent?.user?.id && s.parent?.user?.id === parentUserId) ||
       (s.parentId && s.parentId === parentUserId)
   );
 
-  const { data: manifestsData } = useQuery({
-    queryKey: ["manifests"],
+  const { data: manifestsData } = useQuery<Manifest[]>({
+    queryKey: ["manifests", parentUserId],
     queryFn: async () => {
-      const res = await fetch(MANIFESTS_ENDPOINT);
+      const res = await fetch(MANIFESTS_ENDPOINT, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch manifests");
       const json = await res.json();
-      return Array.isArray(json) ? json : json?.data ?? [];
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
+    refetchInterval: 15000,
+    keepPreviousData: true,
+  });
+  const manifests: Manifest[] = Array.isArray(manifestsData) ? manifestsData : [];
+
+  const { data: busesData } = useQuery<BusItem[]>({
+    queryKey: ["buses"],
+    queryFn: async () => {
+      const res = await fetch(BUSES_ENDPOINT, { headers: authHeaders() });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+    },
+    refetchInterval: 30000,
+  });
+  const buses: BusItem[] = Array.isArray(busesData) ? busesData : [];
+
+  const { data: usersData } = useQuery<UserItem[]>({
+    queryKey: ["users"],
+    queryFn: async () => {
+      const res = await fetch(USERS_ENDPOINT, { headers: authHeaders() });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+    },
+    refetchInterval: 30000,
+  });
+  const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
+
+  /* ---------------- FETCH PER-CHILD TRACKING (secure, onboard-only) ---------------- */
+  // One call per child to the backend's dedicated endpoint, which already
+  // enforces tenant scope and CHECKED_IN/onboard status server-side, and
+  // returns location: null when the child isn't actually on the bus.
+  const myStudentIdsKey = myStudents.map((s: any) => s.id).join(",");
+  const { data: childTracking = {} } = useQuery<Record<number, any>>({
+    queryKey: ["childTracking", myStudentIdsKey],
+    queryFn: async () => {
+      const results: Record<number, any> = {};
+      await Promise.all(
+        myStudents.map(async (s: any) => {
+          try {
+            const res = await fetch(studentTrackingUrl(s.id), {
+              headers: authHeaders(),
+            });
+            results[s.id] = res.ok ? await res.json() : null;
+          } catch {
+            results[s.id] = null;
+          }
+        })
+      );
+      return results;
+    },
+    enabled: myStudents.length > 0,
     refetchInterval: 15000,
   });
 
-  const manifests: Manifest[] = manifestsData ?? [];
-
-  const { data: busesData } = useQuery({
-    queryKey: ["buses"],
-    queryFn: async () => {
-      const res = await fetch(BUSES_ENDPOINT);
-      const json = await res.json();
-      return Array.isArray(json) ? json : json?.data ?? [];
-    },
-    refetchInterval: 30000,
-  });
-
-  const buses: BusItem[] = busesData ?? [];
-
-  const { data: usersData } = useQuery({
-    queryKey: ["users"],
-    queryFn: async () => {
-      const res = await fetch(USERS_ENDPOINT);
-      const json = await res.json();
-      return Array.isArray(json) ? json : json?.data ?? [];
-    },
-    refetchInterval: 30000,
-  });
-
-  const users: UserItem[] = usersData ?? [];
-
-  const { data: busLocationsRaw } = useQuery({
-  queryKey: ["busLocations"],
-  queryFn: async () => {
-    try {
-      const res = await fetch(BUS_LOCATIONS_API, { // Corrected URL
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": TRACKING_KEY, // Use the key from your .env
-        },
-      });
-      if (!res.ok) {
-        console.error("Tracking API Auth Failed:", res.status);
-        return [];
-      }
-      const json = await res.json();
-      // Handle different response shapes (some APIs return { data: [...] })
-      return Array.isArray(json) ? json : json?.data ?? [];
-    } catch (error) {
-      console.error("Network error fetching bus locations:", error);
-      return [];
-    }
-  },
-  refetchInterval: 15000,
-});
-
-  const busLocations: DeviceItem[] = busLocationsRaw ?? [];
-
-  /* ---------------- MAP HELPERS ---------------- */
+  /* ---------------- HELPER MAPS ---------------- */
   const busesById = useMemo(() => {
     const map = new Map<number, BusItem>();
-    buses.forEach((b) => b.id && map.set(b.id, b));
+    for (const b of buses) if (b?.id != null) map.set(Number(b.id), b);
     return map;
   }, [buses]);
 
   const usersById = useMemo(() => {
     const map = new Map<number, UserItem>();
-    users.forEach((u) => u.id && map.set(u.id, u));
+    for (const u of users) if (u?.id != null) map.set(Number(u.id), u);
     return map;
   }, [users]);
 
-  const busLocationsByPlate = useMemo(() => {
-    const map = new Map<string, DeviceItem>();
-    busLocations.forEach((d) => {
-      const key = d.VehicleNo?.trim().replace(/\s+/g, "").toUpperCase();
-      if (key) map.set(key, d);
-    });
-    return map;
-  }, [busLocations]);
-
   const latestManifestByStudent = useMemo(() => {
     const map = new Map<number, Manifest>();
-    const sorted = manifests.sort(
-      (a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()
-    );
-    sorted.forEach((m) => {
+    const sorted = manifests.slice().sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
+    for (const m of sorted) {
       const sid = m.studentId ?? m.student?.id;
       if (sid && !map.has(sid)) map.set(sid, m);
-    });
+    }
     return map;
   }, [manifests]);
 
+  type StudentView = {
+    student: Student;
+    manifest?: Manifest | undefined;
+    status: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN";
+    lat?: number;
+    lon?: number;
+    readableLocation: string;
+    busName?: string;
+    plate?: string;
+    driver?: string;
+    assistant?: string;
+    lastSeen?: string;
+    liveSource?: "device" | "manifest" | "student";
+    movementState?: string;
+  };
+
   const studentViews: StudentView[] = myStudents.map((s: any) => {
     const latest = latestManifestByStudent.get(s.id);
-    if (!latest)
-      return { student: s, status: "UNKNOWN", readableLocation: "No manifest" };
+    const busCandidate =
+      latest?.bus ?? s.bus ?? (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined);
 
-    const bus =
-      latest.bus ?? s.bus ?? (latest.busId ? busesById.get(latest.busId) : undefined);
+    const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
 
-    const plate = bus?.plateNumber?.trim() ?? "";
-    const plateKey = plate.replace(/\s+/g, "").toUpperCase();
-    const device = busLocationsByPlate.get(plateKey);
+    let lat: number | undefined = undefined;
+    let lon: number | undefined = undefined;
+    let readableLocation = "Not onboard";
+    let liveSource: StudentView["liveSource"] = "student";
+    let lastSeen: string | undefined = undefined;
+    let movementState: string | undefined = undefined;
 
-    let lat, lon, movementState, lastSeen;
-    if (device?.LastLat && device?.LastLng) {
-      lat = Number(device.LastLat);
-      lon = Number(device.LastLng);
-      movementState = device.movementState ?? "unknown";
-      lastSeen = device.lastUpdate ?? "";
+    let status: StudentView["status"] = "UNKNOWN";
+    if (latest?.status) {
+      const st = (latest.status ?? "").toString().toUpperCase();
+      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
+      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
+    } else {
+      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
+      else if (latest?.alightingTime) status = "CHECKED_OUT";
     }
 
-    const driver =
-      bus?.driver?.name ?? (bus?.driverId ? usersById.get(bus.driverId)?.name : "N/A");
-    const assistant =
-      bus?.assistant?.name ?? (bus?.assistantId ? usersById.get(bus.assistantId)?.name : "N/A");
+    // Only ever place a marker while the child is genuinely onboard right
+    // now. Both branches below are gated on status === "CHECKED_IN" so an
+    // offboarded child's last-known (boarding-time) coordinates can never
+    // leak onto the map after they've been checked out.
+    const tracking = childTracking[s.id];
+    if (status === "CHECKED_IN" && tracking?.tripStatus === "ONBOARD" && tracking?.location) {
+      lat = tracking.location.lat != null ? Number(tracking.location.lat) : undefined;
+      lon = tracking.location.lng != null ? Number(tracking.location.lng) : undefined;
+      readableLocation = s.name;
+      liveSource = "device";
+      lastSeen = tracking.location.lastUpdate;
+      movementState = tracking.location.movementState ?? "unknown";
+    }
 
-    let status = "UNKNOWN";
-    const st = latest.status?.toUpperCase();
-    if (["CHECKED_IN", "ONBOARDED"].includes(st)) status = "CHECKED_IN";
-    else if (["CHECKED_OUT"].includes(st)) status = "CHECKED_OUT";
+    if (status === "CHECKED_IN" && (!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
+      lat = Number(latest.latitude);
+      lon = Number(latest.longitude);
+      readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
+      liveSource = "manifest";
+      movementState = "unknown";
+    }
+
+    const driverName =
+      busCandidate?.driver?.name ?? (busCandidate?.driverId ? usersById.get(Number(busCandidate.driverId))?.name : undefined) ?? "N/A";
+    const assistantName =
+      busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
+
 
     return {
       student: s,
@@ -671,30 +298,50 @@ export default function ParentPortal() {
       status,
       lat,
       lon,
-      readableLocation: s.name,
-      busName: bus?.name ?? "No Bus Assigned",
-      plate,
-      driver,
-      assistant,
+      readableLocation,
+      busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
+      plate: rawPlate || "N/A",
+      driver: driverName,
+      assistant: assistantName,
       lastSeen,
+      liveSource,
       movementState,
-      showOnMap: lat && lon && status === "CHECKED_IN",
     };
   });
 
-  const markers = studentViews.filter((v) => v.showOnMap);
+  const onboardWithCoords = studentViews.filter(
+    (v) =>
+      v.lat != null &&
+      v.lon != null &&
+      v.lat >= -90 &&
+      v.lat <= 90 &&
+      v.lon >= -180 &&
+      v.lon <= 180
+  );
 
-  const bounds =
-    markers.length > 0
-      ? L.latLngBounds(markers.map((v) => [v.lat!, v.lon!]))
-      : null;
+  /* ---------------- Selected child (dropdown) ---------------- */
+  const selectedView =
+    selectedStudentId === "all"
+      ? null
+      : studentViews.find((v) => String(v.student.id) === selectedStudentId) ?? null;
+  const selectedIsOnboard = selectedView?.status === "CHECKED_IN" && selectedView?.lat != null && selectedView?.lon != null;
+  const focusTarget = selectedIsOnboard ? { lat: selectedView!.lat!, lon: selectedView!.lon! } : null;
 
-  // Default to first student on mobile list when nothing is selected
-  useEffect(() => {
-    if (!selectedStudentId && studentViews.length > 0) {
-      setSelectedStudentId(studentViews[0].student.id);
-    }
-  }, [selectedStudentId, studentViews]);
+  // The map only ever shows the bus for the child currently selected in
+  // the dropdown — and only if they've actually boarded. Selecting "All
+  // children" still shows every onboard child's bus; selecting one
+  // specific child who hasn't boarded shows no marker at all.
+  const markersWithCoords =
+    selectedStudentId === "all"
+      ? onboardWithCoords
+      : selectedIsOnboard
+      ? onboardWithCoords.filter((v) => String(v.student.id) === selectedStudentId)
+      : [];
+
+  const bounds = markersWithCoords.length
+    ? L.latLngBounds(markersWithCoords.map((v) => [v.lat!, v.lon!]))
+    : null;
+
 
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
@@ -702,112 +349,21 @@ export default function ParentPortal() {
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   };
 
-  /* ---------------- Group vehicles by plate number ---------------- */
-  type VehicleView = {
-    plateNumber: string;
-    busName: string;
-    lat?: number;
-    lng?: number;
-    driver?: string;
-    assistant?: string;
-    lastSeen?: string;
-    movementState?: string;
-    readableLocation: string;
-    students: StudentView[];
-  };
-
-  const vehiclesByPlate = useMemo(() => {
-    const map = new Map<string, VehicleView>();
-    
-    studentViews.forEach((sv) => {
-      const plate = sv.plate || "UNKNOWN";
-      if (!map.has(plate)) {
-        map.set(plate, {
-          plateNumber: plate,
-          busName: sv.busName || "No Bus Assigned",
-          lat: sv.lat,
-          lng: sv.lon,
-          driver: sv.driver,
-          assistant: sv.assistant,
-          lastSeen: sv.lastSeen,
-          movementState: sv.movementState,
-          readableLocation: sv.readableLocation,
-          students: [],
-        });
-      }
-      const vehicle = map.get(plate)!;
-      vehicle.students.push(sv);
-      // Use the most recent location if multiple students have different locations
-      if (sv.lat && sv.lon && (!vehicle.lat || !vehicle.lng)) {
-        vehicle.lat = sv.lat;
-        vehicle.lng = sv.lon;
-        vehicle.lastSeen = sv.lastSeen;
-        vehicle.movementState = sv.movementState;
-        vehicle.readableLocation = sv.readableLocation;
-      }
-    });
-    
-    return Array.from(map.values());
-  }, [studentViews]);
-
-  /* ---------------- Get selected vehicle ---------------- */
-  const selectedVehicle = useMemo(() => {
-    if (!selectedStudentId) return null;
-    const selectedStudent = studentViews.find(sv => sv.student.id === selectedStudentId);
-    if (!selectedStudent) return null;
-    return vehiclesByPlate.find(v => v.plateNumber === selectedStudent.plate) || null;
-  }, [selectedStudentId, studentViews, vehiclesByPlate]);
-
-  const selectedStudentView = useMemo(() => {
-    return studentViews.find((sv) => sv.student.id === selectedStudentId) ?? studentViews[0] ?? null;
-  }, [selectedStudentId, studentViews]);
-
-  const mobileMovementState = selectedVehicle?.movementState?.toLowerCase() || "unknown";
-  const mobileIsMoving = mobileMovementState === "moving" || mobileMovementState === "driving";
-  const primaryStudent = selectedVehicle?.students?.[0];
-
-  /* ---------------- Vehicle markers for map ---------------- */
-  const vehicleMarkers = vehiclesByPlate.filter(
-    (v) =>
-      v.lat != null &&
-      v.lng != null &&
-      v.lat >= -90 &&
-      v.lat <= 90 &&
-      v.lng >= -180 &&
-      v.lng <= 180
-  );
-
-  const vehicleBounds = vehicleMarkers.length
-    ? L.latLngBounds(vehicleMarkers.map((v) => [v.lat!, v.lng!]))
-    : null;
-
   return (
-    <div className="min-h-screen bg-muted/30 flex flex-col">
-      <header className="bg-white border-b shadow-sm sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Car className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold text-foreground">Parent Portal</h1>
-              <p className="text-[11px] sm:text-xs text-muted-foreground">Live tracking & updates</p>
-            </div>
+    <div className="min-h-screen bg-muted/30">
+      <header className="bg-card border-b p-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bus className="h-6 w-6 text-primary" />
+            <h1 className="text-xl font-bold">Parent Portal</h1>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden sm:flex flex-col items-end leading-tight">
-              <span className="text-sm font-semibold text-foreground">{currentUser?.name ?? "Parent"}</span>
-              <span className="text-[11px] text-muted-foreground">Welcome back</span>
-            </div>
-            <Avatar className="h-9 w-9 border">
-              <AvatarImage src="" alt={currentUser?.name ?? "Parent"} />
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                {(currentUser?.name || "P").slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+          <div>
+            <span className="mr-4 text-sm text-muted-foreground">
+              Welcome, {currentUser?.name}
+            </span>
             <button
               onClick={handleLogout}
-              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-medium text-sm sm:text-base"
+              className="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600"
             >
               Logout
             </button>
@@ -815,365 +371,158 @@ export default function ParentPortal() {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Left Side - Scrollable Content */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-32 lg:pb-6 space-y-4 sm:space-y-6">
-          <div className="space-y-2">
-            <h2 className="text-xl sm:text-2xl font-bold text-foreground">My Children</h2>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Track your children's current vehicle status and live location. Select a child to focus the map and details.
-            </p>
-          </div>
+      <main className="max-w-7xl mx-auto p-6 space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold">My Children</h2>
+          <p className="text-sm text-muted-foreground">
+            Track your children's current bus status and live location.
+          </p>
+        </div>
 
-          <div className="bg-card border rounded-lg shadow-sm p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-foreground">Select child</p>
-              <p className="text-xs text-muted-foreground">
-                {studentViews.length === 0
-                  ? "No students found for your account."
-                  : studentViews.length === 1
-                  ? "Single child detected. Showing details."
-                  : "Choose a child to focus the map and details."}
-              </p>
-            </div>
-            {studentViews.length > 0 && (
-              <Select
-                value={selectedStudentId?.toString() ?? ""}
-                onValueChange={(val) => {
-                  const id = Number(val);
-                  setSelectedStudentId(id);
-                  setShowMobileDetails(false);
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-[280px] md:w-[320px]">
-                  <SelectValue placeholder="Select child" />
-                </SelectTrigger>
-                <SelectContent className="max-h-[240px]">
-                  {studentViews.map((v) => {
-                    const s = v.student;
-                    const label =
-                      v.status === "CHECKED_IN"
-                        ? "Boarded"
-                        : v.status === "CHECKED_OUT"
-                        ? "Checked Out"
-                        : "Not Onboarded";
-                    return (
-                      <SelectItem key={s.id} value={s.id.toString()}>
-                        {s.name} — {label}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+        {studentViews.length > 0 && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <label className="text-sm font-medium text-muted-foreground shrink-0">
+              Select child:
+            </label>
+            <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue placeholder="Select a child" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All children</SelectItem>
+                {studentViews.map((v) => (
+                  <SelectItem key={v.student.id} value={String(v.student.id)}>
+                    {v.student.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedView && !selectedIsOnboard && (
+              <span className="text-xs text-muted-foreground">
+                {selectedView.student.name} isn't onboard right now — no live location to show.
+              </span>
             )}
           </div>
+        )}
 
-          {/* Desktop: no child cards; selection via dropdown. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {loadingStudents ? (
+            <p className="col-span-full text-center text-muted-foreground">
+              Loading student data...
+            </p>
+          ) : studentViews.length === 0 ? (
+            <Card className="col-span-full text-center py-8 text-muted-foreground">
+              No students found for your account.
+            </Card>
+          ) : (
+            studentViews
+              .filter((v) => selectedStudentId === "all" || String(v.student.id) === selectedStudentId)
+              .map((v) => {
+              const s = v.student;
+              const manifest = v.manifest;
+              const statusLabel =
+                v.status === "CHECKED_IN"
+                  ? "Boarded (On Bus)"
+                  : v.status === "CHECKED_OUT"
+                  ? "Offboarded (Checked Out)"
+                  : "Not Onboarded";
 
-          {/* Map Section */}
-          <div className="space-y-2">
-            <h2 className="text-lg sm:text-xl font-bold text-foreground">Vehicle Locations</h2>
-            <div className="h-[400px] sm:h-[500px] lg:h-[600px] rounded-lg overflow-hidden shadow-lg border relative z-0">
-              <MapContainer
-                center={[-1, 36]}
-                zoom={4}
-                style={{ width: "100%", height: "100%", position: "relative", zIndex: 0 }}
-              >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <FitBounds bounds={vehicleBounds} />
-                <FlyToLocation selectedVehicle={selectedVehicle || undefined} />
-
-                {vehicleMarkers.map((vehicle) => {
-                  const isSelected = selectedVehicle?.plateNumber === vehicle.plateNumber;
-                  const movementState = vehicle.movementState?.toLowerCase() || "unknown";
-                  const isMoving = movementState === "moving" || movementState === "driving";
-
-                  const markerProps: any = {
-                    key: vehicle.plateNumber,
-                    position: [Number(vehicle.lat!), Number(vehicle.lng!)] as [number, number],
-                    icon: createBusIcon(vehicle, isSelected),
-                    eventHandlers: {
-                      click: () => {
-                        // Find first student on this vehicle and select them
-                        const firstStudent = vehicle.students[0];
-                        if (firstStudent) {
-                          setSelectedStudentId(firstStudent.student.id);
-                          setShowMobileDetails(true);
-                        }
-                      },
-                    },
-                    zIndexOffset: isSelected ? 1000 : 100,
-                  };
-                  
-                  return (
-                    <Marker {...markerProps}>
-                      <Popup
-                        maxWidth={240}
-                        minWidth={180}
-                        autoPan
-                        autoPanPadding={[12, 12]}
-                        closeButton={false}
-                        className="shadow-md"
-                      >
-                        <div className="w-[220px] max-w-[90vw] space-y-2 p-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-foreground truncate">{vehicle.busName}</div>
-                              <div className="text-[11px] text-muted-foreground truncate">
-                                Plate: {vehicle.plateNumber}
-                              </div>
-                            </div>
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium ${
-                                isMoving ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                              }`}
-                            >
-                              <span className={`h-2 w-2 rounded-full ${isMoving ? "bg-green-500" : "bg-amber-500"}`} />
-                              {isMoving ? "Moving" : "Stopped"}
-                            </span>
-                          </div>
-
-                          <div className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
-                            {vehicle.readableLocation}
-                          </div>
-
-                          {vehicle.students.length > 0 && (
-                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                              <span>Students</span>
-                              <span className="font-semibold text-foreground">{vehicle.students.length}</span>
-                            </div>
-                          )}
-                        </div>
-                      </Popup>
-                    </Marker>
-                  );
-                })}
-              </MapContainer>
-            </div>
-          </div>
-        </main>
-
-        {/* Right Sidebar - Combined Details (Desktop) */}
-        <aside className="hidden lg:block w-[400px] bg-card border-l shadow-lg p-6 overflow-y-auto">
-          <div className="sticky top-6 space-y-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-foreground">Details</h2>
-                <div className="text-xs text-muted-foreground">
-                  {selectedStudentView ? "Selected child" : "No child selected"}
-                </div>
-              </div>
-
-              {selectedStudentView ? (
-                <Card className="border shadow-sm">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <CardTitle className="text-base truncate">{selectedStudentView.student.name}</CardTitle>
-                        <CardDescription className="text-xs">
-                          {selectedStudentView.student.grade ?? selectedStudentView.student.className ?? "Grade N/A"}
-                        </CardDescription>
-                      </div>
-                      <Badge
-                        className={`text-white ${
-                          selectedStudentView.status === "CHECKED_IN"
-                            ? "bg-green-500"
-                            : selectedStudentView.status === "CHECKED_OUT"
-                            ? "bg-blue-500"
-                            : "bg-gray-500"
-                        }`}
-                      >
-                        {selectedStudentView.status === "CHECKED_IN"
-                          ? "Boarded"
-                          : selectedStudentView.status === "CHECKED_OUT"
-                          ? "Checked Out"
-                          : "Not Onboarded"}
-                      </Badge>
-                    </div>
+              return (
+                <Card
+                  key={s.id}
+                  onClick={() => setSelectedStudentId(String(s.id))}
+                  className={`cursor-pointer transition-colors hover:border-primary ${
+                    selectedStudentId === String(s.id) ? "border-primary ring-1 ring-primary" : ""
+                  }`}
+                >
+                  <CardHeader>
+                    <CardTitle>{s.name}</CardTitle>
+                    <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <CardContent className="space-y-3">
+                    <div className="flex gap-2">
+                      <Bus className="h-4 w-4 text-primary" />
                       <div>
-                        <p className="font-semibold text-foreground text-sm">Route / Bus</p>
-                        <p className="truncate">{selectedStudentView.busName}</p>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-foreground text-sm">Plate</p>
-                        <p className="truncate">{selectedStudentView.plate}</p>
+                        <div>{v.busName}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Plate: {v.plate}
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+
+                    <div className="flex gap-2">
+                      <MapPin className="h-4 w-4 text-accent" />
                       <div>
-                        <p className="text-muted-foreground">Boarding</p>
-                        <p className="font-medium">
-                          {selectedStudentView.manifest?.boardingTime
-                            ? fmt(selectedStudentView.manifest?.boardingTime)
-                            : "—"}
-                        </p>
+                        <div>{statusLabel}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {v.readableLocation}
+                          {v.lastSeen ? ` — last seen: ${fmt(v.lastSeen)}` : ""}
+                          {v.movementState ? ` — Movement: ${v.movementState}` : ""}
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-muted-foreground">Alighting</p>
-                        <p className="font-medium">
-                          {selectedStudentView.manifest?.alightingTime
-                            ? fmt(selectedStudentView.manifest?.alightingTime)
-                            : "—"}
-                        </p>
-                      </div>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground space-y-1 mt-3">
+                      <p>Driver: {v.driver ?? "N/A"}</p>
+                      <p>Assistant: {v.assistant ?? "N/A"}</p>
+                      <p>
+                        Boarding: {fmt(manifest?.boardingTime)}
+                        {" | "}Alighting: {fmt(manifest?.alightingTime)}
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
-              ) : (
-                <Card className="border-dashed border text-center text-muted-foreground py-10">
-                  <CardContent>Select a child to view details</CardContent>
-                </Card>
-              )}
-            </div>
+              );
+            })
+          )}
+        </div>
 
-            <div>
-              <h3 className="text-sm font-semibold mb-2 text-foreground">Vehicle Details</h3>
-              <VehicleDetailsCard
-                vehicle={selectedVehicle}
-                students={studentViews}
-                parentId={parentUserId}
-                variant="full"
-              />
-            </div>
-          </div>
-        </aside>
-
-        {/* Mobile Bottom Sheet - Peekable Vehicle Details */}
-        {selectedVehicle && (
-          <aside
-            className={`fixed bottom-0 left-0 right-0 bg-muted/70 backdrop-blur-sm border-t shadow-2xl z-50 lg:hidden transition-all duration-300 ${
-              showMobileDetails ? "max-h-[55vh]" : "h-[110px]"
-            }`}
-          >
-            <div className="sticky top-0 bg-card px-3 py-2.5 flex items-center gap-3 border-b z-10">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-foreground truncate">{selectedVehicle.busName}</h2>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-                      mobileIsMoving ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                    }`}
-                  >
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        mobileIsMoving ? "bg-green-500" : "bg-amber-500"
-                      }`}
-                    />
-                    {mobileIsMoving ? "Moving" : "Stopped"}
-                  </span>
-                </div>
-                <div className="text-[11px] text-muted-foreground truncate">
-                  Plate: {selectedVehicle.plateNumber ?? "N/A"}
-                </div>
-              </div>
-
-              <Button
-                variant="destructive"
-                size="sm"
-                className="shrink-0 px-3 h-9 text-xs font-semibold"
-                onClick={triggerPanic}
-                aria-label="Emergency"
-              >
-                <ShieldAlert className="h-3.5 w-3.5 mr-2" />
-                Emergency
-              </Button>
-
-              <button
-                onClick={() => setShowMobileDetails((prev) => !prev)}
-                className="p-2 rounded-full hover:bg-muted transition-colors shrink-0"
-                aria-label={showMobileDetails ? "Collapse details" : "Expand details"}
-              >
-                {showMobileDetails ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-              </button>
-            </div>
-
-            <div
-              className={`transition-all duration-300 ${
-                showMobileDetails ? "opacity-100 max-h-[46vh] pb-2" : "opacity-0 max-h-0 pointer-events-none"
-              } overflow-y-auto`}
+        <div className="h-[500px]">
+          <MapContainer
+              center={[-1, 36]}
+              zoom={4}
+              style={{ width: "100%", height: "100%" }}
             >
-              <div className="p-3 space-y-3">
-                {selectedStudentView && (
-                  <Card className="border shadow-sm">
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <CardTitle className="text-sm font-semibold truncate">
-                            {selectedStudentView.student.name}
-                          </CardTitle>
-                          <CardDescription className="text-xs">
-                            {selectedStudentView.student.grade ?? selectedStudentView.student.className ?? "Grade N/A"}
-                          </CardDescription>
-                        </div>
-                        <Badge
-                          className={`text-white ${
-                            selectedStudentView.status === "CHECKED_IN"
-                              ? "bg-green-500"
-                              : selectedStudentView.status === "CHECKED_OUT"
-                              ? "bg-blue-500"
-                              : "bg-gray-500"
-                          }`}
-                        >
-                          {selectedStudentView.status === "CHECKED_IN"
-                            ? "Boarded"
-                            : selectedStudentView.status === "CHECKED_OUT"
-                            ? "Checked Out"
-                            : "Not Onboarded"}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-xs">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <p className="text-muted-foreground">Route / Bus</p>
-                          <p className="font-medium text-foreground truncate">{selectedStudentView.busName}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Plate</p>
-                          <p className="font-medium text-foreground truncate">{selectedStudentView.plate}</p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <p className="text-muted-foreground">Boarding</p>
-                          <p className="font-medium">
-                            {selectedStudentView.manifest?.boardingTime
-                              ? fmt(selectedStudentView.manifest?.boardingTime)
-                              : "—"}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Alighting</p>
-                          <p className="font-medium">
-                            {selectedStudentView.manifest?.alightingTime
-                              ? fmt(selectedStudentView.manifest?.alightingTime)
-                              : "—"}
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <FitBounds bounds={bounds} />
+              <FocusOnSelected target={focusTarget} />
 
-                <VehicleDetailsCard
-                  vehicle={selectedVehicle}
-                  students={studentViews}
-                  parentId={parentUserId}
-                  showPanicButton={false}
-                  panicTrigger={panicTriggerKey}
-                  variant="sheet"
-                />
-              </div>
-            </div>
-          </aside>
-        )}
-      </div>
+              {markersWithCoords.map((v) => {
+                // Same icon builder as the admin Tracking page: colored by
+                // movementState, grayed out when this isn't a live device
+                // fix (e.g. falling back to a manifest-recorded location).
+                const icon = createBusIcon({
+                  plateNumber: v.plate,
+                  movementState: v.movementState,
+                  lat: v.lat,
+                  lng: v.lon,
+                  __fallback: v.liveSource !== "device",
+                });
+
+                return (
+                  <Marker
+                    key={v.student.id}
+                    position={[Number(v.lat!), Number(v.lon!)]}
+                    icon={icon}
+                  >
+                    <Popup>
+                      <div className="space-y-1">
+                        <strong>{v.student.name}</strong>
+                        <div>{v.busName}</div>
+                        <div>Status: {v.status}</div>
+                        <div>{v.readableLocation}</div>
+                        <div>Driver: {v.driver}</div>
+                        <div>Assistant: {v.assistant}</div>
+                        {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
+                        {v.movementState && <div>Bus Movement: {v.movementState}</div>}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
+            </MapContainer>
+        </div>
+      </main>
     </div>
   );
 }

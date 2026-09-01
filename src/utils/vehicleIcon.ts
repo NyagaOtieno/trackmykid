@@ -14,20 +14,27 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
   const isFallback = vehicle.__fallback === true || !vehicle.lat || !vehicle.lng;
   const direction = vehicle.direction || 0;
   
-  // Determine status color
-  // Green for moving/driving, Blue for stopped/standing, Gray for no GPS
+  // Determine status treatment. bus.png is a yellow school bus — keep
+  // it yellow in every state (as requested) instead of hue-shifting it
+  // to green/blue. Still convey state, but only via brightness/opacity
+  // so the bus color itself stays consistent everywhere.
   let filterColor = "";
   if (isFallback) {
-    filterColor = "grayscale(100%) brightness(0.5)"; // Gray for no GPS
+    filterColor = "grayscale(100%) brightness(0.6)"; // no GPS fix — grayed out
   } else if (movementState === "moving" || movementState === "driving") {
-    filterColor = "hue-rotate(90deg) saturate(1.5)"; // Green tint
+    filterColor = "saturate(1.3) brightness(1.05)"; // moving — vivid yellow
   } else {
-    filterColor = "hue-rotate(200deg) saturate(1.2)"; // Blue tint
+    filterColor = "saturate(1.1) brightness(0.9)"; // stopped/standing — slightly dimmer yellow
   }
   
   const size = isSelected ? 40 : 32;
+  const backingColor = isFallback ? "#9ca3af" : "#f4c430"; // gray badge for no-GPS, yellow otherwise
   
-  // Create a div wrapper with the bus image, filter, and rotation
+  // Wrap the bus image in a yellow rounded backing so the marker still
+  // reads clearly as "a yellow bus" even before the image loads, and
+  // falls back to a plain yellow badge (via onerror hiding the broken
+  // image) if /bus.png ever fails to load instead of showing a blank
+  // or broken-image glyph.
   const iconHtml = `
     <div style="
       display: flex;
@@ -35,17 +42,22 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
       justify-content: center;
       width: ${size}px;
       height: ${size}px;
-      filter: ${filterColor} drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+      background: ${backingColor};
+      border-radius: 6px;
+      border: 2px solid #fff;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.4);
       transform: rotate(${direction}deg);
       z-index: ${isSelected ? 1000 : 100};
     ">
       <img 
         src="/bus.png" 
         alt="Bus" 
+        onerror="this.style.display='none'"
         style="
           width: 100%;
           height: 100%;
           object-fit: contain;
+          filter: ${filterColor};
         "
       />
     </div>
