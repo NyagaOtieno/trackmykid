@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getCurrentUser } from "@/lib/auth";
 import {
   Select,
   SelectContent,
@@ -16,15 +17,44 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import { useMemo, useEffect, useState } from "react";
-// Same icon builder Tracking.tsx (admin) uses, so parent and admin
-// render the identical bus marker instead of the old mismatched
-// flaticon PNGs (which also had inverted moving/stopped colors).
-import { createBusIcon } from "@/utils/vehicleIcon";
+import { createBusIcon, colorStateLabel } from "@/utils/vehicleIcon";
+import { useSmoothPosition } from "@/hooks/useSmoothPosition";
+import BusPlayback from "@/components/BusPlayback";
+
+/* ---------------- Animated marker: glides between 30s polls ---------------- */
+function AnimatedStudentMarker({ v }: { v: any }) {
+  const target = v.lat != null && v.lon != null ? { lat: Number(v.lat), lng: Number(v.lon) } : null;
+  const display = useSmoothPosition(target, 18000);
+  if (!display) return null;
+  const { label, className } = colorStateLabel(v.colorState);
+
+  return (
+    <Marker
+      position={[display.lat, display.lng]}
+      icon={createBusIcon({ ...v, lat: display.lat, lng: display.lng, plateNumber: v.plate })}
+    >
+      <Popup>
+        <div className="space-y-1">
+          <div><strong>Plate: {v.plate}</strong></div>
+          <strong>{v.student.name}</strong>
+          <span className={`inline-block text-xs px-2 py-0.5 rounded ${className}`}>{label}</span>
+          <div>{v.busName}</div>
+          <div>Status: {v.status}</div>
+          <div>{v.readableLocation}</div>
+          <div>Driver: {v.driver}</div>
+          <div>Assistant: {v.assistant}</div>
+          {v.lastSeen && <div>Last Seen: {new Date(v.lastSeen).toLocaleString()}</div>}
+          {v.movementState && <div>Bus Movement: {v.movementState}</div>}
+          {v.nearPickup && <div className="text-green-600">Approaching pickup ({v.nearPickupMeters}m away)</div>}
+        </div>
+      </Popup>
+    </Marker>
+  );
+}
 
 /* ---------------- Auto-fit map bounds component ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
@@ -35,35 +65,17 @@ function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
   return null;
 }
 
-/* ---------------- Fly to the selected child's bus ---------------- */
-// Zooms in on the selected student's live position, but only when
-// they're actually onboard (has a lat/lon) — the backend/UI already
-// hide location entirely otherwise, so there's nothing to zoom to.
-function FocusOnSelected({ target }: { target: { lat: number; lon: number } | null }) {
-  const map = useMap();
-  useEffect(() => {
-    if (target) map.flyTo([target.lat, target.lon], 16, { duration: 1 });
-  }, [target, map]);
-  return null;
-}
-
 /* ---------------- API ENDPOINTS ---------------- */
-const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
-const STUDENTS_ENDPOINT = `${API_BASE}/students`;
-const MANIFESTS_ENDPOINT = `${API_BASE}/manifests`;
-const BUSES_ENDPOINT = `${API_BASE}/buses`;
-const USERS_ENDPOINT = `${API_BASE}/users`;
-// Secure, tenant-scoped, onboard-only per-child tracking endpoint.
-// Returns { tripStatus: "ONBOARD" | ..., location: { lat, lng, movementState, lastUpdate } | null }
-const studentTrackingUrl = (studentId: number | string) =>
-  `${API_BASE}/tracking/student/${studentId}`;
-
-// ✅ Login.tsx stores the session token under localStorage "token" —
-// keep every fetch in this file consistent with that.
-const authHeaders = () => {
-  const token = localStorage.getItem("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+const STUDENTS_ENDPOINT =
+  "https://tmk-api.joshpitah.co.ke/api/students";
+const MANIFESTS_ENDPOINT =
+  "https://tmk-api.joshpitah.co.ke/api/manifests";
+const BUSES_ENDPOINT =
+  "https://tmk-api.joshpitah.co.ke/api/buses";
+const USERS_ENDPOINT =
+  "https://tmk-api.joshpitah.co.ke/api/users";
+const TRACKING_ENDPOINT =
+  "https://tmk-api.joshpitah.co.ke/api/tracking/bus-locations";
 
 /* ---------------- TYPES ---------------- */
 type Student = any;
@@ -107,7 +119,7 @@ export default function ParentPortal() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
-  const [selectedStudentId, setSelectedStudentId] = useState<string>("all");
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
 
   const handleLogout = () => {
     localStorage.removeItem("parent");
@@ -119,7 +131,10 @@ export default function ParentPortal() {
   const { data: studentsData, isLoading: loadingStudents } = useQuery({
     queryKey: ["students"],
     queryFn: async () => {
-      const res = await fetch(STUDENTS_ENDPOINT, { headers: authHeaders() });
+      const token = localStorage.getItem("token");
+      const res = await fetch(STUDENTS_ENDPOINT, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) throw new Error("Failed to fetch students");
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
@@ -136,7 +151,10 @@ export default function ParentPortal() {
   const { data: manifestsData } = useQuery<Manifest[]>({
     queryKey: ["manifests", parentUserId],
     queryFn: async () => {
-      const res = await fetch(MANIFESTS_ENDPOINT, { headers: authHeaders() });
+      const token = localStorage.getItem("token");
+      const res = await fetch(MANIFESTS_ENDPOINT, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) throw new Error("Failed to fetch manifests");
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
@@ -149,7 +167,10 @@ export default function ParentPortal() {
   const { data: busesData } = useQuery<BusItem[]>({
     queryKey: ["buses"],
     queryFn: async () => {
-      const res = await fetch(BUSES_ENDPOINT, { headers: authHeaders() });
+      const token = localStorage.getItem("token");
+      const res = await fetch(BUSES_ENDPOINT, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) return [];
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
@@ -161,7 +182,10 @@ export default function ParentPortal() {
   const { data: usersData } = useQuery<UserItem[]>({
     queryKey: ["users"],
     queryFn: async () => {
-      const res = await fetch(USERS_ENDPOINT, { headers: authHeaders() });
+      const token = localStorage.getItem("token");
+      const res = await fetch(USERS_ENDPOINT, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) return [];
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
@@ -170,32 +194,21 @@ export default function ParentPortal() {
   });
   const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 
-  /* ---------------- FETCH PER-CHILD TRACKING (secure, onboard-only) ---------------- */
-  // One call per child to the backend's dedicated endpoint, which already
-  // enforces tenant scope and CHECKED_IN/onboard status server-side, and
-  // returns location: null when the child isn't actually on the bus.
-  const myStudentIdsKey = myStudents.map((s: any) => s.id).join(",");
-  const { data: childTracking = {} } = useQuery<Record<number, any>>({
-    queryKey: ["childTracking", myStudentIdsKey],
+  /* ---------------- FETCH LIVE BUS LOCATIONS ---------------- */
+  const { data: busLocationsRaw } = useQuery<DeviceItem[]>({
+    queryKey: ["busLocations"],
     queryFn: async () => {
-      const results: Record<number, any> = {};
-      await Promise.all(
-        myStudents.map(async (s: any) => {
-          try {
-            const res = await fetch(studentTrackingUrl(s.id), {
-              headers: authHeaders(),
-            });
-            results[s.id] = res.ok ? await res.json() : null;
-          } catch {
-            results[s.id] = null;
-          }
-        })
-      );
-      return results;
+      const token = localStorage.getItem("token");
+      const res = await fetch(TRACKING_ENDPOINT, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json?.data) ? json.data : [];
     },
-    enabled: myStudents.length > 0,
-    refetchInterval: 15000,
+    refetchInterval: 30000,
   });
+  const busLocations: DeviceItem[] = Array.isArray(busLocationsRaw) ? busLocationsRaw : [];
 
   /* ---------------- HELPER MAPS ---------------- */
   const busesById = useMemo(() => {
@@ -209,6 +222,15 @@ export default function ParentPortal() {
     for (const u of users) if (u?.id != null) map.set(Number(u.id), u);
     return map;
   }, [users]);
+
+  const busLocationsByPlate = useMemo(() => {
+    const map = new Map<string, DeviceItem>();
+    for (const d of busLocations) {
+      const key = (d.plateNumber ?? "").toString().trim().replace(/\s+/g, "").toUpperCase();
+      if (key) map.set(key, d);
+    }
+    return map;
+  }, [busLocations]);
 
   const latestManifestByStudent = useMemo(() => {
     const map = new Map<number, Manifest>();
@@ -238,6 +260,10 @@ export default function ParentPortal() {
     lastSeen?: string;
     liveSource?: "device" | "manifest" | "student";
     movementState?: string;
+    busId?: number;
+    colorState?: "RED" | "YELLOW" | "GREEN" | "GRAY";
+    nearPickup?: boolean;
+    nearPickupMeters?: number | null;
   };
 
   const studentViews: StudentView[] = myStudents.map((s: any) => {
@@ -246,44 +272,53 @@ export default function ParentPortal() {
       latest?.bus ?? s.bus ?? (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined);
 
     const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
+    const plateKey = rawPlate.replace(/\s+/g, "").toUpperCase();
+
+    // Determine boarding status FIRST — location is only ever shown while onboard.
+    let onboardStatus: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN" = "UNKNOWN";
+    if (latest?.status) {
+      const st = (latest.status ?? "").toString().toUpperCase();
+      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) onboardStatus = "CHECKED_IN";
+      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) onboardStatus = "CHECKED_OUT";
+    } else {
+      if (latest?.boardingTime && !latest?.alightingTime) onboardStatus = "CHECKED_IN";
+      else if (latest?.alightingTime) onboardStatus = "CHECKED_OUT";
+    }
 
     let lat: number | undefined = undefined;
     let lon: number | undefined = undefined;
-    let readableLocation = "Not onboard";
+    let readableLocation = onboardStatus === "CHECKED_IN" ? "Location unavailable" : "Not onboard";
     let liveSource: StudentView["liveSource"] = "student";
     let lastSeen: string | undefined = undefined;
     let movementState: string | undefined = undefined;
+    let colorState: StudentView["colorState"] = "GRAY";
+    let nearPickup = false;
+    let nearPickupMeters: number | null = null;
 
-    let status: StudentView["status"] = "UNKNOWN";
-    if (latest?.status) {
-      const st = (latest.status ?? "").toString().toUpperCase();
-      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
-      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
-    } else {
-      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
-      else if (latest?.alightingTime) status = "CHECKED_OUT";
-    }
+    // Only resolve a live location while the child is actually checked in.
+    if (onboardStatus === "CHECKED_IN") {
+      // Match device by plate
+      let deviceMatch = busLocationsByPlate.get(plateKey);
 
-    // Only ever place a marker while the child is genuinely onboard right
-    // now. Both branches below are gated on status === "CHECKED_IN" so an
-    // offboarded child's last-known (boarding-time) coordinates can never
-    // leak onto the map after they've been checked out.
-    const tracking = childTracking[s.id];
-    if (status === "CHECKED_IN" && tracking?.tripStatus === "ONBOARD" && tracking?.location) {
-      lat = tracking.location.lat != null ? Number(tracking.location.lat) : undefined;
-      lon = tracking.location.lng != null ? Number(tracking.location.lng) : undefined;
-      readableLocation = s.name;
-      liveSource = "device";
-      lastSeen = tracking.location.lastUpdate;
-      movementState = tracking.location.movementState ?? "unknown";
-    }
+      if (deviceMatch && deviceMatch.lat != null && deviceMatch.lng != null) {
+        lat = Number(deviceMatch.lat);
+        lon = Number(deviceMatch.lng);
+        readableLocation = s.name; // show student name instead of plate
+        liveSource = "device";
+        lastSeen = deviceMatch.lastUpdate;
+        movementState = deviceMatch.movementState ?? "unknown";
+        colorState = deviceMatch.colorState ?? "GRAY";
+        nearPickup = !!deviceMatch.nearPickup;
+        nearPickupMeters = deviceMatch.nearPickupMeters ?? null;
+      }
 
-    if (status === "CHECKED_IN" && (!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
-      lat = Number(latest.latitude);
-      lon = Number(latest.longitude);
-      readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
-      liveSource = "manifest";
-      movementState = "unknown";
+      if ((!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
+        lat = Number(latest.latitude);
+        lon = Number(latest.longitude);
+        readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
+        liveSource = "manifest";
+        movementState = "unknown";
+      }
     }
 
     const driverName =
@@ -291,11 +326,10 @@ export default function ParentPortal() {
     const assistantName =
       busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
 
-
     return {
       student: s,
       manifest: latest,
-      status,
+      status: onboardStatus,
       lat,
       lon,
       readableLocation,
@@ -306,10 +340,24 @@ export default function ParentPortal() {
       lastSeen,
       liveSource,
       movementState,
+      busId: busCandidate?.id,
+      colorState,
+      nearPickup,
+      nearPickupMeters,
     };
   });
 
-  const onboardWithCoords = studentViews.filter(
+  // Auto-select the first child once data loads, if none selected yet
+  useEffect(() => {
+    if (selectedStudentId == null && studentViews.length > 0) {
+      setSelectedStudentId(studentViews[0].student.id);
+    }
+  }, [studentViews, selectedStudentId]);
+
+  const selectedView =
+    studentViews.find((v) => v.student.id === selectedStudentId) ?? null;
+
+  const markersWithCoords = (selectedView ? [selectedView] : []).filter(
     (v) =>
       v.lat != null &&
       v.lon != null &&
@@ -318,36 +366,17 @@ export default function ParentPortal() {
       v.lon >= -180 &&
       v.lon <= 180
   );
-
-  /* ---------------- Selected child (dropdown) ---------------- */
-  const selectedView =
-    selectedStudentId === "all"
-      ? null
-      : studentViews.find((v) => String(v.student.id) === selectedStudentId) ?? null;
-  const selectedIsOnboard = selectedView?.status === "CHECKED_IN" && selectedView?.lat != null && selectedView?.lon != null;
-  const focusTarget = selectedIsOnboard ? { lat: selectedView!.lat!, lon: selectedView!.lon! } : null;
-
-  // The map only ever shows the bus for the child currently selected in
-  // the dropdown — and only if they've actually boarded. Selecting "All
-  // children" still shows every onboard child's bus; selecting one
-  // specific child who hasn't boarded shows no marker at all.
-  const markersWithCoords =
-    selectedStudentId === "all"
-      ? onboardWithCoords
-      : selectedIsOnboard
-      ? onboardWithCoords.filter((v) => String(v.student.id) === selectedStudentId)
-      : [];
-
   const bounds = markersWithCoords.length
     ? L.latLngBounds(markersWithCoords.map((v) => [v.lat!, v.lon!]))
     : null;
-
 
   const fmt = (iso?: string | null) => {
     if (!iso) return "—";
     const d = new Date(iso);
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   };
+
+  const [playbackBusId, setPlaybackBusId] = useState<number | null>(null);
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -379,150 +408,126 @@ export default function ParentPortal() {
           </p>
         </div>
 
-        {studentViews.length > 0 && (
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-            <label className="text-sm font-medium text-muted-foreground shrink-0">
-              Select child:
-            </label>
-            <Select value={selectedStudentId} onValueChange={setSelectedStudentId}>
-              <SelectTrigger className="w-full sm:w-64">
-                <SelectValue placeholder="Select a child" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All children</SelectItem>
-                {studentViews.map((v) => (
-                  <SelectItem key={v.student.id} value={String(v.student.id)}>
-                    {v.student.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedView && !selectedIsOnboard && (
-              <span className="text-xs text-muted-foreground">
-                {selectedView.student.name} isn't onboard right now — no live location to show.
-              </span>
+        {loadingStudents ? (
+          <p className="text-center text-muted-foreground">Loading student data...</p>
+        ) : studentViews.length === 0 ? (
+          <Card className="text-center py-8 text-muted-foreground">
+            No students found for your account.
+          </Card>
+        ) : (
+          <>
+            <div className="max-w-sm">
+              <Select
+                value={selectedStudentId != null ? String(selectedStudentId) : ""}
+                onValueChange={(val) => setSelectedStudentId(Number(val))}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {studentViews.find((v) => v.student.id === selectedStudentId)?.student
+                      ?.name || "Select a child"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {studentViews.map((v) => (
+                    <SelectItem key={v.student.id} value={String(v.student.id)}>
+                      {v.student.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedView && (
+              (() => {
+                const v = selectedView;
+                const s = v.student;
+                const manifest = v.manifest;
+                const statusLabel =
+                  v.status === "CHECKED_IN"
+                    ? "Boarded (On Bus)"
+                    : v.status === "CHECKED_OUT"
+                    ? "Offboarded (Checked Out)"
+                    : "Not Onboarded";
+
+                return (
+                  <Card key={s.id} className="max-w-xl">
+                    <CardHeader>
+                      <CardTitle>{s.name}</CardTitle>
+                      <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex gap-2">
+                        <Bus className="h-4 w-4 text-primary" />
+                        <div>
+                          <div>{v.busName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Plate: {v.plate}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <MapPin className="h-4 w-4 text-accent" />
+                        <div>
+                          <div>{statusLabel}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {v.readableLocation}
+                            {v.lastSeen ? ` — last seen: ${fmt(v.lastSeen)}` : ""}
+                            {v.movementState ? ` — Movement: ${v.movementState}` : ""}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-muted-foreground space-y-1 mt-3">
+                        <p>Driver: {v.driver ?? "N/A"}</p>
+                        <p>Assistant: {v.assistant ?? "N/A"}</p>
+                        <p>
+                          Boarding: {fmt(manifest?.boardingTime)}
+                          {" | "}Alighting: {fmt(manifest?.alightingTime)}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()
             )}
-          </div>
+          </>
         )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {loadingStudents ? (
-            <p className="col-span-full text-center text-muted-foreground">
-              Loading student data...
-            </p>
-          ) : studentViews.length === 0 ? (
-            <Card className="col-span-full text-center py-8 text-muted-foreground">
-              No students found for your account.
-            </Card>
-          ) : (
-            studentViews
-              .filter((v) => selectedStudentId === "all" || String(v.student.id) === selectedStudentId)
-              .map((v) => {
-              const s = v.student;
-              const manifest = v.manifest;
-              const statusLabel =
-                v.status === "CHECKED_IN"
-                  ? "Boarded (On Bus)"
-                  : v.status === "CHECKED_OUT"
-                  ? "Offboarded (Checked Out)"
-                  : "Not Onboarded";
-
-              return (
-                <Card
-                  key={s.id}
-                  onClick={() => setSelectedStudentId(String(s.id))}
-                  className={`cursor-pointer transition-colors hover:border-primary ${
-                    selectedStudentId === String(s.id) ? "border-primary ring-1 ring-primary" : ""
-                  }`}
-                >
-                  <CardHeader>
-                    <CardTitle>{s.name}</CardTitle>
-                    <CardDescription>{s.grade ?? s.className ?? "Grade N/A"}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex gap-2">
-                      <Bus className="h-4 w-4 text-primary" />
-                      <div>
-                        <div>{v.busName}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Plate: {v.plate}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <MapPin className="h-4 w-4 text-accent" />
-                      <div>
-                        <div>{statusLabel}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {v.readableLocation}
-                          {v.lastSeen ? ` — last seen: ${fmt(v.lastSeen)}` : ""}
-                          {v.movementState ? ` — Movement: ${v.movementState}` : ""}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-muted-foreground space-y-1 mt-3">
-                      <p>Driver: {v.driver ?? "N/A"}</p>
-                      <p>Assistant: {v.assistant ?? "N/A"}</p>
-                      <p>
-                        Boarding: {fmt(manifest?.boardingTime)}
-                        {" | "}Alighting: {fmt(manifest?.alightingTime)}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </div>
 
         <div className="h-[500px]">
           <MapContainer
-              center={[-1, 36]}
-              zoom={4}
-              style={{ width: "100%", height: "100%" }}
-            >
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <FitBounds bounds={bounds} />
-              <FocusOnSelected target={focusTarget} />
+            center={[-1, 36]}
+            zoom={4}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <FitBounds bounds={bounds} />
 
-              {markersWithCoords.map((v) => {
-                // Same icon builder as the admin Tracking page: colored by
-                // movementState, grayed out when this isn't a live device
-                // fix (e.g. falling back to a manifest-recorded location).
-                const icon = createBusIcon({
-                  plateNumber: v.plate,
-                  movementState: v.movementState,
-                  lat: v.lat,
-                  lng: v.lon,
-                  __fallback: v.liveSource !== "device",
-                });
-
-                return (
-                  <Marker
-                    key={v.student.id}
-                    position={[Number(v.lat!), Number(v.lon!)]}
-                    icon={icon}
-                  >
-                    <Popup>
-                      <div className="space-y-1">
-                        <strong>{v.student.name}</strong>
-                        <div>{v.busName}</div>
-                        <div>Status: {v.status}</div>
-                        <div>{v.readableLocation}</div>
-                        <div>Driver: {v.driver}</div>
-                        <div>Assistant: {v.assistant}</div>
-                        {v.lastSeen && <div>Last Seen: {fmt(v.lastSeen)}</div>}
-                        {v.movementState && <div>Bus Movement: {v.movementState}</div>}
-                      </div>
-                    </Popup>
-                  </Marker>
-                );
-              })}
-            </MapContainer>
+            {markersWithCoords.map((v) => (
+              <AnimatedStudentMarker key={v.student.id} v={v} />
+            ))}
+          </MapContainer>
         </div>
+
+        {selectedView?.busId != null && (
+          <div className="mt-4">
+            <button
+              className="text-sm px-4 py-2 border rounded-lg hover:bg-muted"
+              onClick={() => setPlaybackBusId(selectedView.busId!)}
+            >
+              View trip playback
+            </button>
+          </div>
+        )}
       </main>
+
+      {playbackBusId != null && (
+        <BusPlayback
+          busId={playbackBusId}
+          busLabel={selectedView?.plate}
+          onClose={() => setPlaybackBusId(null)}
+        />
+      )}
     </div>
   );
 }
