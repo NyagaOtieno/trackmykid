@@ -38,38 +38,53 @@ api.interceptors.response.use(
 );
 
 // ======================
+// Helper: unwrap { success, data } or { success, count, data } → plain array/value
+// Backend consistently wraps list responses this way — normalize once, here.
+// ======================
+function unwrapList(d: any) {
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d?.data)) return d.data;
+  return [];
+}
+
+function unwrapItem(d: any) {
+  // for single-object responses like { success, data: {...} }
+  if (d?.data && typeof d.data === "object" && !Array.isArray(d.data)) return d.data;
+  return d;
+}
+
+// ======================
 // GET / FETCH Functions
 // ======================
-export const getStudents = () => api.get("/students").then((res) => res.data);
+export const getStudents = () =>
+  api.get("/students").then((res) => unwrapList(res.data));
 
 // ✅ Fetch buses with expanded relations (driver, assistant, school)
 export const getBusesWithRelations = () =>
-  api.get("/buses?includeRelations=true").then((res) => res.data);
+  api.get("/buses?includeRelations=true").then((res) => unwrapList(res.data));
 
 // ✅ Simple buses list
 export const getBuses = () =>
-  api.get("/buses").then((res) => {
-    const d = res.data;
-    return Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
-  });
+  api.get("/buses").then((res) => unwrapList(res.data));
 
-export const getManifests = () => api.get("/manifests").then((res) => res.data);
+export const getManifests = () =>
+  api.get("/manifests").then((res) => unwrapList(res.data));
 
 // ✅ Tracking Routes
 export const getLiveLocations = () =>
-  api.get("/tracking/live-locations").then((res) => res.data);
+  api.get("/tracking/live-locations").then((res) => unwrapList(res.data));
 export const syncTracking = () =>
   api.get("/tracking/sync").then((res) => res.data);
 export const getBusLocations = () =>
-  api.get("/tracking/bus-locations").then((res) => res.data);
+  api.get("/tracking/bus-locations").then((res) => unwrapList(res.data));
 export const getBusLocation = (busId: number | string) =>
-  api.get(`/tracking/bus/${busId}`).then((res) => res.data);
+  api.get(`/tracking/bus/${busId}`).then((res) => unwrapItem(res.data));
 export const getStudentTracking = (studentId: number | string) =>
-  api.get(`/tracking/student/${studentId}`).then((res) => res.data);
+  api.get(`/tracking/student/${studentId}`).then((res) => unwrapItem(res.data));
 
 // ✅ Playback / history — used by the Playback controls (admin + parent)
 export const getBusHistory = (busId: number | string, limit: number = 200) =>
-  api.get(`/tracking/bus/${busId}/history`, { params: { limit } }).then((res) => res.data);
+  api.get(`/tracking/bus/${busId}/history`, { params: { limit } }).then((res) => unwrapList(res.data));
 
 // ✅ Trip start/end per session for a bus on a given day (defaults to today)
 export const getBusTrips = (busId: number | string, date?: string) =>
@@ -77,14 +92,15 @@ export const getBusTrips = (busId: number | string, date?: string) =>
 
 // ✅ User Role Routes
 export const getAssistants = () =>
-  api.get("/users?role=ASSISTANT").then((res) => res.data);
+  api.get("/users?role=ASSISTANT").then((res) => unwrapList(res.data));
 export const getParents = () =>
-  api.get("/users?role=PARENT").then((res) => res.data);
+  api.get("/users?role=PARENT").then((res) => unwrapList(res.data));
 export const getDrivers = () =>
-  api.get("/users?role=DRIVER").then((res) => res.data);
+  api.get("/users?role=DRIVER").then((res) => unwrapList(res.data));
 export const getAdmins = () =>
-  api.get("/users?role=ADMIN").then((res) => res.data);
-export const getSchools = () => api.get("/schools").then((res) => res.data);
+  api.get("/users?role=ADMIN").then((res) => unwrapList(res.data));
+export const getSchools = () =>
+  api.get("/schools").then((res) => unwrapList(res.data));
 
 // ======================
 // CRUD Functions

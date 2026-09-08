@@ -25,6 +25,7 @@ L.Icon.Default.mergeOptions({
 // API Endpoints
 const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
 const STUDENTS_API = `${API_BASE}/students`;
+const BUSES_API = `${API_BASE}/buses`;
 const MANIFEST_API = `${API_BASE}/manifests`;
 const BUS_LOCATIONS_API = `${API_BASE}/tracking/bus-locations`;
 const PANIC_API = `${API_BASE}/panic`;
@@ -72,6 +73,18 @@ export default function AssistantPortal() {
     onError: () => toast.error("Failed to load students"),
   });
 
+  // Fetch Buses (used to find this assistant's bus directly — works even with zero students)
+  const { data: busesData, isLoading: busesLoading, isError: busesError } = useQuery({
+    queryKey: ["buses"],
+    queryFn: async () => {
+      const res = await axios.get(BUSES_API, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return res.data?.data || [];
+    },
+    onError: () => toast.error("Failed to load buses"),
+  });
+
   // Fetch bus locations
   const { data: busLocationsData } = useQuery({
     queryKey: ["bus-locations"],
@@ -84,11 +97,15 @@ export default function AssistantPortal() {
     refetchInterval: 15000,
   });
 
-  // Assigned students & bus
-  const assignedStudents = Array.isArray(studentsData)
-    ? studentsData.filter((s) => s.bus?.assistantId === assistantId)
+  // Find the bus directly assigned to this assistant (independent of student count)
+  const bus = Array.isArray(busesData)
+    ? busesData.find((b: any) => b.assistantId === assistantId) || null
+    : null;
+
+  // Students on that bus
+  const assignedStudents = Array.isArray(studentsData) && bus
+    ? studentsData.filter((s: any) => s.bus?.id === bus.id)
     : [];
-  const bus = assignedStudents[0]?.bus || null;
 
   // Kenya time helper
   function getKenyaNow() {
@@ -219,8 +236,8 @@ export default function AssistantPortal() {
     }) ?? null;
   }, [busLocationsData, bus]);
 
-  if (studentsLoading) return <p className="p-6 text-center text-muted-foreground">Loading assistant info...</p>;
-  if (studentsError) return <p className="text-red-500 text-center mt-6">Error loading students.</p>;
+  if (studentsLoading || busesLoading) return <p className="p-6 text-center text-muted-foreground">Loading assistant info...</p>;
+  if (studentsError || busesError) return <p className="text-red-500 text-center mt-6">Error loading data.</p>;
   if (!bus) return (
     <div className="p-6 text-center">
       <p>No bus assigned for this assistant.</p>

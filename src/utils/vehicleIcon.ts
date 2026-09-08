@@ -2,7 +2,13 @@ import L from "leaflet";
 
 /**
  * Creates a Leaflet icon using the bus.png image with status-based color
- * filters and rotation support.
+ * filters and Uber-style smooth rotation toward the direction of travel.
+ *
+ * IMPORTANT ASSUMPTION: bus.png must be drawn pointing "up" (north) in its
+ * default orientation. GPS `direction`/course is 0 = north, increasing
+ * clockwise. If the icon looks like it's facing the wrong way, the source
+ * image needs to be re-drawn pointing up, or add a fixed offset below
+ * (e.g. `direction - 90` if the art points east by default).
  *
  * Color meaning (driven by the backend's `colorState` field):
  *   RED    - bus stopped
@@ -10,9 +16,6 @@ import L from "leaflet";
  *   GREEN  - bus moving, empty (no children onboard); pulses if `nearPickup`
  *            is true (within 500m of a student not yet picked up)
  *   GRAY   - no GPS signal / no device linked
- *
- * Falls back to the old movementState-based heuristic if colorState isn't present,
- * so this stays backward compatible with any caller that hasn't been updated yet.
  */
 export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivIcon {
   const isFallback = vehicle.__fallback === true || !vehicle.lat || !vehicle.lng;
@@ -38,27 +41,29 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
   const size = isSelected ? 40 : 32;
   const pulse = colorState === "GREEN" && vehicle.nearPickup;
 
+  // The rotation itself is applied to an INNER div so the outer wrapper
+  // (used for positioning by Leaflet) never gets a CSS transition fighting
+  // with Leaflet's own transform-based positioning. The `transition` here
+  // is what makes turns look smooth ("Uber style") instead of snapping.
   const iconHtml = `
-    <div style="
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: ${size}px;
-      height: ${size}px;
-      filter: ${filterColor} drop-shadow(0 3px 6px rgba(0,0,0,0.4));
-      transform: rotate(${direction}deg);
-      z-index: ${isSelected ? 1000 : 100};
-      ${pulse ? "animation: tmk-pulse 1s ease-in-out infinite;" : ""}
-    ">
-      <img
-        src="/bus.png"
-        alt="Bus"
-        style="
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        "
-      />
+    <div style="width:${size}px;height:${size}px;">
+      <div style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        filter: ${filterColor} drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+        transform: rotate(${direction}deg);
+        transition: transform 0.6s linear;
+        ${pulse ? "animation: tmk-pulse 1s ease-in-out infinite;" : ""}
+      ">
+        <img
+          src="/bus.png"
+          alt="Bus"
+          style="width: 100%; height: 100%; object-fit: contain;"
+        />
+      </div>
     </div>
     <style>
       @keyframes tmk-pulse {
