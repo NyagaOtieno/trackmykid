@@ -1,6 +1,6 @@
 export const getConfig = () => {
   const useMockData = localStorage.getItem('useMockData') !== 'false';
-  const apiBaseUrl = localStorage.getItem('apiBaseUrl') || 'https://schooltransport-production.up.railway.app/api';
+  const apiBaseUrl = localStorage.getItem('apiBaseUrl') || 'https://tmk-api.joshpitah.co.ke/api';
   
   return {
     useMockData,

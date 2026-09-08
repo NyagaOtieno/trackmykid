@@ -2,7 +2,7 @@ import axios from "axios";
 
 // ✅ Create an axios instance with base URL
 const api = axios.create({
-  baseURL: "https://schooltransport-production.up.railway.app/api",
+  baseURL: "https://tmk-api.joshpitah.co.ke/api",
 });
 
 // ✅ Attach Bearer token automatically to every request

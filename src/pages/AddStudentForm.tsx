@@ -3,42 +3,37 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import toast from "react-hot-toast"; 
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Eye, EyeOff, ShieldCheck, AlertCircle, Info, Bus } from "lucide-react";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import toast from "react-hot-toast";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import L, { LeafletMouseEvent } from "leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Marker Icon
+// Leaflet marker icon
 const markerIcon = L.icon({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   iconSize: [30, 45],
   iconAnchor: [15, 45],
 });
 
-// Axios instance
-const api = axios.create({
-  baseURL: "https://schooltransport-production.up.railway.app/api",
-  headers: { "Content-Type": "application/json" }
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-// Location Picker
+// Map click with reverse geocoding
 function LocationPicker({ onPick }: { onPick: (coords: { lat: number; lng: number; address?: string }) => void }) {
   useMapEvents({
-    async click(e: LeafletMouseEvent) {
+    async click(e) {
       const { lat, lng } = e.latlng;
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+        );
         const data = await res.json();
-        const address = data?.display_name?.split(",").slice(0, 3).join(", ") || "Selected Location";
+        const address = data?.display_name?.split(",").slice(0, 3).join(", ") || "Unknown location";
         onPick({ lat, lng, address });
       } catch {
         onPick({ lat, lng });
@@ -48,244 +43,197 @@ function LocationPicker({ onPick }: { onPick: (coords: { lat: number; lng: numbe
   return null;
 }
 
-export default function AddStudentForm({ onSuccess, editData }: { onSuccess?: () => void; editData?: any }) {
+export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }) {
   const [schools, setSchools] = useState<any[]>([]);
-  const [allBuses, setAllBuses] = useState<any[]>([]);
-  const [filteredBuses, setFilteredBuses] = useState<any[]>([]);
+  const [buses, setBuses] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  
-  const [coords, setCoords] = useState<{ lat: number | null; lng: number | null }>({ 
-    lat: editData?.latitude || null, 
-    lng: editData?.longitude || null 
-  });
+  const [coords, setCoords] = useState<{ lat: number | null; lng: number | null }>({ lat: null, lng: null });
 
   const [form, setForm] = useState({
-    name: editData?.name || "",
-    grade: editData?.grade || "",
-    busId: editData?.busId || "",
-    schoolId: editData?.schoolId || "",
-    parentName: editData?.parentName || "",
-    parentPhone: editData?.parentPhone || "",
-    parentEmail: editData?.parentEmail || "",
+    name: "",
+    grade: "",
+    busId: "",
+    schoolId: "",
+    parentName: "",
+    parentPhone: "",
+    parentEmail: "",
     parentPassword: "",
-    confirmPassword: "",
-    location: editData?.location || "",
+    location: "",
   });
 
-  const validatePassword = (pwd: string) => {
-    return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/.test(pwd);
-  };
-
-  // Fetch schools and buses
+  // Load schools and buses
   useEffect(() => {
     const fetchData = async () => {
       try {
+        const token = localStorage.getItem("token");
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
         const [schoolsRes, busesRes] = await Promise.all([
-          api.get("/schools"),
-          api.get("/buses"),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/schools", { headers: authHeaders }),
+          axios.get("https://tmk-api.joshpitah.co.ke/api/buses", { headers: authHeaders }),
         ]);
-        setSchools(schoolsRes.data);
-        setAllBuses(busesRes.data);
+        const unwrap = (d: any) => (Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : []);
+        setSchools(unwrap(schoolsRes.data));
+        setBuses(unwrap(busesRes.data));
       } catch (err) {
-        toast.error("Failed to load data.");
+        console.error(err);
+        toast.error("Failed to load schools or buses.");
       }
     };
     fetchData();
   }, []);
 
-  // Filter buses by school
-  useEffect(() => {
-    if (form.schoolId) {
-      const filtered = allBuses.filter(bus => String(bus.schoolId) === String(form.schoolId));
-      setFilteredBuses(filtered);
+  // Convert typed location to coords
+  const geocodeLocation = async (location: string) => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`);
+      const data = await res.json();
+      if (data.length > 0) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      throw new Error("Location not found");
+    } catch {
+      toast.error("Could not locate the area. Try typing more precisely.");
+      return null;
     }
-  }, [form.schoolId, allBuses]);
+  };
 
-  // Handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!validatePassword(form.parentPassword)) {
-      toast.error("Parent password must be 8+ characters, include uppercase, number, and special symbol.", { position: "top-center" });
-      return;
-    }
-
-    if (form.parentPassword !== form.confirmPassword) {
-      toast.error("Passwords do not match.", { position: "top-center" });
-      return;
-    }
-
-    if (!coords.lat || !coords.lng) {
-      toast.error("Please pick a location on the map.", { position: "top-center" });
-      return;
-    }
-
-    if (!form.busId || !form.schoolId) {
-      toast.error("Please select school and bus.", { position: "top-center" });
-      return;
-    }
-
     setLoading(true);
-    const mainToast = toast.loading("Saving student...", { position: "top-center" });
-
     try {
-      // Send request to create student with parent info
-      const res = await api.post("/students", {
+      // Ensure coords
+      let latitude = coords.lat;
+      let longitude = coords.lng;
+      if (!latitude || !longitude) {
+        const geocoded = await geocodeLocation(form.location);
+        if (!geocoded) throw new Error("Pickup location required.");
+        latitude = geocoded.lat;
+        longitude = geocoded.lng;
+      }
+
+      // Ensure IDs are numbers
+      const busId = Number(form.busId);
+      const schoolId = Number(form.schoolId);
+      if (!busId || !schoolId) throw new Error("Select a Bus and a School.");
+
+      // Ensure parent fields
+      if (!form.parentName || !form.parentPhone || !form.parentEmail || !form.parentPassword)
+        throw new Error("Parent details and password required.");
+
+      const payload = {
         name: form.name,
         grade: form.grade,
-        latitude: Number(coords.lat),
-        longitude: Number(coords.lng),
-        busId: Number(form.busId),
-        schoolId: Number(form.schoolId),
+        latitude,
+        longitude,
+        busId,
+        schoolId,
         parentName: form.parentName,
         parentPhone: form.parentPhone,
-        parentEmail: form.parentEmail
+        parentEmail: form.parentEmail,
+        parentPassword: form.parentPassword,
+      };
+
+      await axios.post("https://tmk-api.joshpitah.co.ke/api/students", payload, {
+        headers: { "Content-Type": "application/json" },
       });
 
-      toast.success("✅ Student created successfully!", { id: mainToast });
+      toast.success("✅ Student added successfully!");
       onSuccess?.();
-
-      // Reset form
-      setForm({
-        name: "",
-        grade: "",
-        busId: "",
-        schoolId: "",
-        parentName: "",
-        parentPhone: "",
-        parentEmail: "",
-        parentPassword: "",
-        confirmPassword: "",
-        location: "",
-      });
+      setForm({ name: "", grade: "", busId: "", schoolId: "", parentName: "", parentPhone: "", parentEmail: "", parentPassword: "", location: "" });
       setCoords({ lat: null, lng: null });
-
     } catch (err: any) {
       console.error(err);
-      toast.error(err.response?.data?.message || "Failed to create student.", { id: mainToast });
+      toast.error("❌ Failed to add student: " + (err.message || ""));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="h-full bg-white">
-      <ScrollArea className="h-full px-6">
-        <form onSubmit={handleSubmit} className="space-y-8 py-6 max-w-5xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {/* Left: Student Section */}
-            <div className="space-y-4">
-              <h3 className="text-xl font-bold flex items-center gap-2">
-                <span className="h-7 w-7 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm">1</span>
-                Student Info
-              </h3>
-              <div className="space-y-2">
+    <div className="flex justify-center p-6 md:p-10 bg-gray-50 min-h-screen overflow-y-auto">
+      <Card className="w-full max-w-7xl shadow-lg border border-gray-200 bg-white rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-2xl font-semibold text-gray-800">Add New Student</CardTitle>
+          <p className="text-gray-500 text-sm mt-1">Fill out the student details and select a pickup location.</p>
+        </CardHeader>
+
+        <CardContent className="max-h-[calc(100vh-200px)] overflow-y-auto p-6">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* LEFT */}
+            <div className="space-y-5">
+              <div>
                 <Label>Full Name</Label>
-                <Input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Student Name" required />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Grade</Label>
-                  <Input required value={form.grade} onChange={e => setForm({...form, grade: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                  <Label>School</Label>
-                  <select className="flex h-10 w-full rounded-md border border-input px-3 bg-white text-sm"
-                    value={form.schoolId} onChange={e => setForm({...form, schoolId: e.target.value})} required>
-                    <option value="">Select School</option>
-                    {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
+              <div>
+                <Label>Grade</Label>
+                <Input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="Grade 5" required />
               </div>
-              <div className="space-y-2">
-                  <Label className="flex items-center gap-2"><Bus size={14}/> Assigned Bus & Plate</Label>
-                  <select className="flex h-10 w-full rounded-md border border-input px-3 bg-white text-sm disabled:opacity-50"
-                    value={form.busId} onChange={e => setForm({...form, busId: e.target.value})} required disabled={!form.schoolId}>
-                    <option value="">{form.schoolId ? "Select Bus" : "← Select School"}</option>
-                    {filteredBuses.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} — [{b.plateNumber || 'N/A'}]
-                      </option>
-                    ))}
-                  </select>
+              <div>
+                <Label>School</Label>
+                <Select value={form.schoolId} onValueChange={(val) => setForm({ ...form, schoolId: val })} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select School" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {schools.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Bus</Label>
+                <Select value={form.busId} onValueChange={(val) => setForm({ ...form, busId: val })} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Bus" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {buses.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name} ({b.plateNumber})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* RIGHT */}
+            <div className="space-y-5">
+              <div>
+                <Label>Parent Name</Label>
+                <Input value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="Jane Doe" required />
+              </div>
+              <div>
+                <Label>Parent Phone</Label>
+                <Input type="tel" value={form.parentPhone} onChange={(e) => setForm({ ...form, parentPhone: e.target.value })} placeholder="07XXXXXXXX" required />
+              </div>
+              <div>
+                <Label>Parent Email</Label>
+                <Input type="email" value={form.parentEmail} onChange={(e) => setForm({ ...form, parentEmail: e.target.value })} placeholder="example@email.com" required />
+              </div>
+              <div>
+                <Label>Parent Password</Label>
+                <Input type="password" value={form.parentPassword} onChange={(e) => setForm({ ...form, parentPassword: e.target.value })} placeholder="Set a password for parent" required />
+              </div>
+              <div>
+                <Label>Pickup Location</Label>
+                <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Type or click on map" />
+                <p className="text-xs text-gray-500 mt-1">Type a place name or select on the map below.</p>
               </div>
             </div>
 
-            {/* Right: Parent Section */}
-            <div className="space-y-4">
-              <h3 className="text-xl font-bold flex items-center gap-2">
-                <span className="h-7 w-7 bg-green-600 text-white rounded-full flex items-center justify-center text-sm">2</span>
-                Parent Info
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                    <Label>Name</Label>
-                    <Input required value={form.parentName} onChange={e => setForm({...form, parentName: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                    <Label>Phone</Label>
-                    <Input required type="tel" value={form.parentPhone} onChange={e => setForm({...form, parentPhone: e.target.value})} placeholder="0712..." />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input required type="email" value={form.parentEmail} onChange={e => setForm({...form, parentEmail: e.target.value})} />
-              </div>
-              
-              <div className="space-y-2 relative">
-                <Label>Password</Label>
-                <div className="relative">
-                  <Input required type={showPassword ? "text" : "password"} value={form.parentPassword} onChange={e => setForm({...form, parentPassword: e.target.value})} className="pr-10" />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-gray-400">
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-                <div className={`flex items-start gap-1.5 mt-1 text-[11px] leading-tight ${form.parentPassword && !validatePassword(form.parentPassword) ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                    <Info size={13} className="mt-0.5 shrink-0" />
-                    <p>8+ characters, including Uppercase, Number, and Special Symbol.</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Confirm</Label>
-                <div className="relative">
-                  <Input required type={showPassword ? "text" : "password"} value={form.confirmPassword} onChange={e => setForm({...form, confirmPassword: e.target.value})} 
-                    className={form.confirmPassword && form.parentPassword !== form.confirmPassword ? "border-red-500 pr-10" : "pr-10"} />
-                  {form.confirmPassword && (
-                    <div className="absolute right-3 top-2.5">
-                      {form.parentPassword === form.confirmPassword ? <ShieldCheck size={18} className="text-green-500" /> : <AlertCircle size={18} className="text-red-500" />}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-          <div className="space-y-4">
-            <h3 className="text-xl font-bold flex items-center gap-2">
-               <span className="h-7 w-7 bg-amber-500 text-white rounded-full flex items-center justify-center text-sm">3</span>
-               Pickup Point
-            </h3>
-            <Input readOnly value={form.location} className="bg-slate-50 italic text-sm" placeholder="Pick on map..." />
-            <div className="h-[300px] w-full rounded-xl border-2 overflow-hidden shadow-inner">
-              <MapContainer center={[-1.286389, 36.817223]} zoom={12} style={{ height: "100%", width: "100%" }}>
+            {/* MAP */}
+            <div className="col-span-1 md:col-span-2">
+              <Label className="block mb-2 text-gray-700 font-medium">Select on Map</Label>
+              <MapContainer center={[-1.286389, 36.817223]} zoom={13} className="h-[500px] w-full rounded-xl border border-gray-300 shadow-md">
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <LocationPicker onPick={p => {
-                  setCoords({ lat: p.lat, lng: p.lng });
-                  if (p.address) setForm({...form, location: p.address});
-                }} />
+                <LocationPicker onPick={(pos) => { setCoords({ lat: pos.lat, lng: pos.lng }); if (pos.address) setForm({ ...form, location: pos.address }); }} />
                 {coords.lat && <Marker position={[coords.lat, coords.lng]} icon={markerIcon} />}
               </MapContainer>
+              {coords.lat && <p className="text-sm text-green-600 mt-3">✅ Selected: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</p>}
             </div>
-          </div>
 
-          <Button type="submit" disabled={loading} className="w-full h-14 text-lg font-bold transition-transform active:scale-95">
-            {loading ? "Registering..." : "Complete Student Registration"}
-          </Button>
-        </form>
-      </ScrollArea>
+            {/* SUBMIT */}
+            <div className="col-span-1 md:col-span-2 flex justify-center pt-6">
+              <Button type="submit" disabled={loading} className="w-full md:w-1/3 py-3 text-lg font-medium">{loading ? "Saving..." : "Add Student"}</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
