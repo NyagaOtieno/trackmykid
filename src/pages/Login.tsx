@@ -17,10 +17,21 @@ import { Eye, EyeOff } from "lucide-react";
 const AUTH_URL = "/auth/login";
 const FORGOT_URL = "/auth/forgot-password";
 
+// Detect whether the entered identifier looks like an email or a phone number.
+function buildLoginPayload(identifier: string, password: string) {
+  const trimmed = identifier.trim();
+  if (trimmed.includes("@")) {
+    return { email: trimmed.toLowerCase(), password };
+  }
+  // Treat anything else as a phone number — strip spaces/dashes, keep leading +
+  const phone = trimmed.replace(/[^\d+]/g, "");
+  return { phone, password };
+}
+
 export default function Login() {
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState(""); // email OR phone
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -60,8 +71,9 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      // 🚀 Login via api instance
-      const response = await api.post(AUTH_URL, { email, password });
+      // 🚀 Login via api instance — send email OR phone, whichever was entered
+      const payload = buildLoginPayload(identifier, password);
+      const response = await api.post(AUTH_URL, payload);
       const { token, user } = response.data || {};
 
       if (!token || !user) {
@@ -142,15 +154,15 @@ export default function Login() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
+              <label htmlFor="identifier" className="text-sm font-medium">
+                Email or Phone Number
               </label>
               <Input
-                id="email"
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                placeholder="your@email.com or 07XXXXXXXX"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
                 disabled={isLoading}
               />
