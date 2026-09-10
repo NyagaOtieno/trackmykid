@@ -37,6 +37,7 @@ export default function BusPlayback({ busId, busLabel, onClose }: Props) {
       setError(null);
       try {
         const res = await getBusHistory(busId, 200);
+        console.log("[BusPlayback] busId:", busId, "response:", res);
         const raw: HistoryPoint[] = Array.isArray(res?.data) ? res.data : [];
         const valid = raw.filter((p) => p.lat != null && p.lng != null);
         // Oldest -> newest, so playback moves forward in time

@@ -1,9 +1,10 @@
 // Tracking.tsx - Admin live vehicle tracking
 // - Calls /tracking/live-locations (NOT /tracking/bus-locations which is history)
-// - Polls every 30s; markers glide smoothly between updates (useSmoothPosition)
+// - Polls every 1s; markers glide smoothly between updates (useSmoothPosition)
 // - Color: RED = stopped, YELLOW = moving with child onboard, GREEN = moving empty
 //   (pulses when within 500m of a pickup), GRAY = no GPS
-// - Map does NOT jump on every poll - only flies when user explicitly clicks a vehicle
+// - Map flies to a vehicle once when selected, then keeps re-centering on it
+//   every update (without resetting zoom) until deselected
 // - Playback (history) opens a modal calling GET /tracking/bus/:busId/history
 
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -20,17 +21,28 @@ import BusPlayback from "@/components/BusPlayback";
 
 const POLL_MS = 1000;
 
-// -- FlyTo: only fires when userSelected changes (not on every poll) --
-function FlyToLocation({ target }: { target: { lat: number; lng: number } | null }) {
+// -- FlyTo once on selection, then keep centered on the same vehicle every poll --
+function FlyToLocation({ target, followKey }: { target: { lat: number; lng: number } | null; followKey: string | null }) {
   const map = useMap();
-  const prevRef = useRef<string>("");
+  const prevFollowKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!target) return;
-    const key = `${target.lat.toFixed(5)},${target.lng.toFixed(5)}`;
-    if (key === prevRef.current) return;
-    prevRef.current = key;
-    map.flyTo([target.lat, target.lng], 15, { animate: true, duration: 1 });
-  }, [target, map]);
+    console.log("[FlyToLocation]", { target, followKey, prev: prevFollowKeyRef.current });
+
+    if (!target || !followKey) {
+      prevFollowKeyRef.current = null;
+      return;
+    }
+    if (followKey !== prevFollowKeyRef.current) {
+      console.log("[FlyToLocation] flying to new selection", target);
+      map.flyTo([target.lat, target.lng], 15, { animate: true, duration: 1 });
+      prevFollowKeyRef.current = followKey;
+    } else {
+      console.log("[FlyToLocation] re-centering same vehicle", target);
+      map.setView([target.lat, target.lng], map.getZoom(), { animate: true });
+    }
+  }, [target, followKey, map]);
+
   return null;
 }
 
@@ -178,7 +190,7 @@ export default function Tracking() {
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <FlyToLocation target={flyTarget} />
+          <FlyToLocation target={flyTarget} followKey={userSelectedId} />
           {filtered.map((bus: any) => {
             const id = String(bus.busId ?? bus.vehicleReg);
             return (

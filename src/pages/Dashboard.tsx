@@ -2,25 +2,23 @@ import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Bus, Users, ClipboardList, MapPin } from "lucide-react";
+import { Loader2, Bus, Users, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import L from "leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import type L from "leaflet";
+import { getLiveLocations } from "@/lib/api";
+import { createBusIcon } from "@/utils/vehicleIcon";
 
 /**
  * Dashboard (single-file)
  *
  * - Keeps existing APIs (students, buses, manifests, users).
- * - Replaces the old tracking call with mytrack-production endpoints:
- *   - GET /api/devices/list
- *   - GET /api/devices/latest?imei=
- * - Uses X-API-Key header when calling mytrack-production.
+ * - Live bus positions now come from OUR OWN backend's /tracking/live-locations
+ *   (same source Tracking.tsx uses), NOT the old mytrack-production API —
+ *   that API (tmk-api.joshpitah.co.ke/api/devices/list) no longer exists and
+ *   was 404-ing on every load. All of that dead code has been removed.
+ * - Map now supports click-to-center, same pattern as Tracking.tsx.
  */
-
-// === CONFIG ===
-const TRACK_API_BASE = "https://tmk-api.joshpitah.co.ke";
-const TRACK_API_KEY = "x2AJdCzZaM5y8tPaui5of6qhuovc5SST7y-y6rR_fD0="; // from your Postman collection
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 // --- API calls (existing endpoints kept) ---
 const authHeaders = () => {
@@ -60,63 +58,6 @@ const getUsers = async () => {
   return data.data || [];
 };
 
-// --- TrackMyKid API helpers (use X-API-Key header) ---
-const trackAxios = axios.create({
-  baseURL: TRACK_API_BASE,
-  headers: {
-    "X-API-Key": TRACK_API_KEY,
-  },
-});
-
-const getDevices = async () => {
-  const { data } = await trackAxios.get("/api/devices/list");
-  // support responses that are either array or { data: [...] }
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.data)) return data.data;
-  return data || [];
-};
-
-const getDeviceLatest = async (imei: string) => {
-  try {
-    const { data } = await trackAxios.get("/api/devices/latest", { params: { imei } });
-    const payload = data?.data ?? data ?? null;
-    if (!payload) return null;
-
-    // Accept both { latitude, longitude } and { lat, lng }
-    let latitude = payload.latitude ?? payload.lat ?? null;
-    let longitude = payload.longitude ?? payload.lng ?? null;
-    const timestamp = payload.timestamp ?? payload.time ?? payload.server_time ?? null;
-
-    // Convert to numbers where possible
-    latitude = latitude !== null && latitude !== undefined ? Number(latitude) : null;
-    longitude = longitude !== null && longitude !== undefined ? Number(longitude) : null;
-
-    // Defensive swap: if latitude appears > 90 but longitude <= 90, swap them
-    if (
-      Number.isFinite(latitude) &&
-      Math.abs(latitude) > 90 &&
-      Number.isFinite(longitude) &&
-      Math.abs(longitude) <= 90
-    ) {
-      const tmp = latitude;
-      latitude = longitude;
-      longitude = tmp;
-    }
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-
-    return {
-      latitude,
-      longitude,
-      timestamp,
-      raw: payload,
-    };
-  } catch (err) {
-    console.error("getDeviceLatest error", imei, err);
-    return null;
-  }
-};
-
 // --- Reverse geocode helper (Nominatim) ---
 const locationCache: Record<string, string> = {};
 const getLocationFromLatLon = async (lat: number, lon: number) => {
@@ -135,12 +76,17 @@ const getLocationFromLatLon = async (lat: number, lon: number) => {
   }
 };
 
-// --- Leaflet bus icon ---
-const busIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/61/61222.png",
-  iconSize: [30, 30],
-  iconAnchor: [15, 30],
-});
+// -- Fit the map to show all live buses once, on first load / whenever the set changes size --
+function FitAllBuses({ positions }: { positions: [number, number][] }) {
+  const map = useMap();
+  const didFitRef = useRef(false);
+  useEffect(() => {
+    if (positions.length === 0 || didFitRef.current) return;
+    map.fitBounds(positions, { padding: [40, 40] });
+    didFitRef.current = true;
+  }, [positions, map]);
+  return null;
+}
 
 export default function Dashboard() {
   // UI state
@@ -152,10 +98,10 @@ export default function Dashboard() {
 
   // Data state
   const [studentLocations, setStudentLocations] = useState<Record<number, string>>({});
-  const [manifestLocations, setManifestLocations] = useState<Record<number, any>>({});
+  const [tripAddresses, setTripAddresses] = useState<Record<number, string>>({});
   const [driversMap, setDriversMap] = useState<Record<number, any>>({});
-  const [devices, setDevices] = useState<any[]>([]);
-  const manifestDeviceMapRef = useRef<Record<number, any>>({}); // manifestId -> device
+  const [selectedBusId, setSelectedBusId] = useState<number | string | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
 
   // Queries for existing endpoints
   const { data: students = [], isLoading: loadingStudents, error: errorStudents } = useQuery({
@@ -178,14 +124,23 @@ export default function Dashboard() {
     queryFn: getUsers,
   });
 
-  // Fetch devices (track backend)
-  const { data: devicesData = [], isLoading: loadingDevices, error: errorDevices } = useQuery({
-    queryKey: ["track-devices"],
-    queryFn: getDevices,
-    onSuccess: (d) => {
-      setDevices(d || []);
+  // Live bus positions — from OUR OWN backend, same as Tracking.tsx
+  const { data: liveLocations = [], error: errorLive } = useQuery({
+    queryKey: ["liveLocations"],
+    queryFn: async () => {
+      const res = await getLiveLocations();
+      return Array.isArray(res) ? res : res?.data ?? [];
     },
+    refetchInterval: 5000,
   });
+
+  const liveByBusId = useMemo(() => {
+    const map = new Map<number, any>();
+    for (const l of liveLocations as any[]) {
+      if (l?.busId != null) map.set(Number(l.busId), l);
+    }
+    return map;
+  }, [liveLocations]);
 
   // Map driverId -> driver object
   useEffect(() => {
@@ -199,13 +154,13 @@ export default function Dashboard() {
   }, [users]);
 
   // Error toast
-  const errorOccurred = errorStudents || errorBuses || errorManifests || errorUsers || errorDevices;
+  const errorOccurred = errorStudents || errorBuses || errorManifests || errorUsers || errorLive;
   useEffect(() => {
     if (errorOccurred) toast.error("Failed to load some dashboard data. Please refresh.");
   }, [errorOccurred]);
 
   const isLoading =
-    loadingStudents || loadingBuses || loadingManifests || loadingUsers || loadingDevices;
+    loadingStudents || loadingBuses || loadingManifests || loadingUsers;
 
   // Today's manifests
   const today = new Date().toISOString().split("T")[0];
@@ -223,167 +178,21 @@ export default function Dashboard() {
     });
   }, [students]);
 
-  // Normalize plate helper
-  const normalizePlate = (v: any) => {
-    if (!v) return "";
-    return String(v).replace(/[\s\-]/g, "").toUpperCase();
-  };
-
-  // Resolve device match & fetch initial locations for manifests
+  // Reverse-geocode each trip's CURRENT live bus position (replaces the old
+  // dead-device-lookup logic entirely)
   useEffect(() => {
-    // require devices to be loaded
-    if (!devices || devices.length === 0) return;
-
-    // iterate manifests for today
     todaysManifests.forEach(async (m: any) => {
-      // skip if already resolved
-      if (manifestLocations[m.id]) return;
-
-      const busObj = m.bus || {};
-      const candidates = [
-        busObj.registration,
-        busObj.vehicle_no,
-        busObj.name,
-        m.bus_no,
-        m.vehicle_no,
-      ]
-        .filter(Boolean)
-        .map(normalizePlate);
-
-      if (candidates.length === 0) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No vehicle registration available" }));
-        return;
-      }
-
-      const foundDevice = devices.find((d: any) => {
-        const devPlate = normalizePlate(d.vehicle_no ?? d.vehicleNo ?? d.vehicle_no ?? d.vehicleNo);
-        return candidates.includes(devPlate);
-      });
-
-      if (!foundDevice) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No tracking device matched" }));
-        return;
-      }
-
-      // save mapping
-      manifestDeviceMapRef.current[m.id] = foundDevice;
-
-      if (!foundDevice.imei) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "Device found but IMEI missing" }));
-        return;
-      }
-
-      // temp loading state
-      setManifestLocations((prev) => ({ ...prev, [m.id]: "Loading location..." }));
-
-      // fetch latest
-      const latest = await getDeviceLatest(foundDevice.imei);
-      if (!latest) {
-        setManifestLocations((prev) => ({ ...prev, [m.id]: "No location returned" }));
-        return;
-      }
-
-      // reverse geocode
-      const address = await getLocationFromLatLon(latest.latitude, latest.longitude);
-
-      setManifestLocations((prev) => ({
-        ...prev,
-        [m.id]: {
-          latitude: latest.latitude,
-          longitude: latest.longitude,
-          timestamp: latest.timestamp,
-          address,
-          imei: foundDevice.imei,
-          deviceId: foundDevice.id,
-          raw: latest.raw,
-        },
-      }));
+      const busId = m.busId ?? m.bus?.id;
+      if (busId == null) return;
+      const live = liveByBusId.get(Number(busId));
+      if (!live || live.lat == null || live.lng == null) return;
+      const key = `${live.lat.toFixed(4)},${live.lng.toFixed(4)}`;
+      if (tripAddresses[m.id] === key) return; // already resolved for this position
+      const address = await getLocationFromLatLon(live.lat, live.lng);
+      setTripAddresses((prev) => ({ ...prev, [m.id]: address }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
-
-  // Polling: refresh latest positions for unique IMEIs matched to today's manifests
-  useEffect(() => {
-    let cancelled = false;
-    const runPoll = async () => {
-      try {
-        // collect unique IMEIs from manifestDeviceMapRef
-        const imeis = Array.from(
-          new Set(
-            Object.values(manifestDeviceMapRef.current)
-              .filter(Boolean)
-              .map((d: any) => d.imei)
-              .filter(Boolean)
-          )
-        );
-
-        if (imeis.length === 0) return;
-
-        // fetch all latest concurrently
-        const results = await Promise.all(
-          imeis.map(async (imei) => {
-            const latest = await getDeviceLatest(imei);
-            return { imei, latest };
-          })
-        );
-
-        if (cancelled) return;
-
-        // Update each manifestLocations entry that maps to a given imei
-        const updates: Record<number, any> = {};
-        Object.entries(manifestDeviceMapRef.current).forEach(([manifestIdStr, device]) => {
-          const manifestId = Number(manifestIdStr);
-          const found = results.find((r) => r.imei === device.imei);
-          const entry = found?.latest;
-          if (!entry) return;
-          // reverse geocode if address changed or missing
-          (async () => {
-            const address =
-              manifestLocations[manifestId]?.address ||
-              (entry ? await getLocationFromLatLon(entry.latitude, entry.longitude) : "Unknown location");
-
-            updates[manifestId] = {
-              latitude: entry.latitude,
-              longitude: entry.longitude,
-              timestamp: entry.timestamp,
-              address,
-              imei: device.imei,
-              deviceId: device.id,
-              raw: entry.raw,
-            };
-
-            // push updates into state (batch)
-            setManifestLocations((prev) => ({ ...prev, ...updates }));
-          })();
-        });
-      } catch (err) {
-        console.error("Polling error", err);
-      }
-    };
-
-    // initial run
-    runPoll();
-
-    const id = setInterval(() => {
-      runPoll();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [devices, todaysManifests]);
-
-  // ensure manifestLocations that have lat/lon but no address get reverse-geocoded
-  useEffect(() => {
-    Object.entries(manifestLocations).forEach(async ([mid, val]) => {
-      if (typeof val === "object" && val.latitude && val.longitude && !val.address) {
-        const address = await getLocationFromLatLon(val.latitude, val.longitude);
-        setManifestLocations((prev) => ({ ...prev, [Number(mid)]: { ...val, address } }));
-      }
-    });
-  }, [manifestLocations]);
+  }, [todaysManifests, liveByBusId]);
 
   // --- Filtered & paginated Students (unchanged) ---
   const filteredStudents = useMemo(() => {
@@ -406,12 +215,11 @@ export default function Dashboard() {
     studentPage * rowsPerPage
   );
 
-  // --- Filtered & paginated Trips (uses manifestLocations for location text) ---
+  // --- Filtered & paginated Trips ---
   const filteredTrips = useMemo(() => {
     const search = tripSearch.toLowerCase();
     return todaysManifests.filter((t: any) => {
-      const locObj = manifestLocations[t.id];
-      const loc = typeof locObj === "string" ? locObj : (locObj?.address || "");
+      const loc = tripAddresses[t.id] || "";
       const driverName = driversMap[t.bus?.driverId]?.name || "";
       return (
         (t.bus?.name?.toLowerCase().includes(search)) ||
@@ -424,12 +232,27 @@ export default function Dashboard() {
         loc.toLowerCase().includes(search)
       );
     });
-  }, [todaysManifests, tripSearch, manifestLocations, driversMap]);
+  }, [todaysManifests, tripSearch, tripAddresses, driversMap]);
 
   const paginatedTrips = filteredTrips.slice(
     (tripPage - 1) * rowsPerPage,
     tripPage * rowsPerPage
   );
+
+  // Live buses with valid coordinates, ready for the map
+  const mappableBuses = useMemo(
+    () => (liveLocations as any[]).filter((b) => b.lat != null && b.lng != null),
+    [liveLocations]
+  );
+  const allPositions: [number, number][] = mappableBuses.map((b) => [b.lat, b.lng]);
+
+  function selectAndCenterBus(bus: any) {
+    const id = bus.busId;
+    setSelectedBusId((prev) => (prev === id ? null : id));
+    if (bus.lat != null && bus.lng != null && mapRef.current) {
+      mapRef.current.flyTo([bus.lat, bus.lng], 15, { animate: true, duration: 1 });
+    }
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -562,52 +385,53 @@ export default function Dashboard() {
                   <th className="py-2 px-3">Assistant</th>
                   <th className="py-2 px-3">Session</th>
                   <th className="py-2 px-3">Status</th>
-                  <th className="py-2 px-3">Drop Off Location</th>
+                  <th className="py-2 px-3">Current Location</th>
                 </tr>
               </thead>
               <tbody>
-                {paginatedTrips.map((trip, idx) => (
-                  <tr key={trip.id} className="border-b last:border-0 hover:bg-gray-50 transition">
-                    <td className="py-2 px-3">{(tripPage - 1) * rowsPerPage + idx + 1}</td>
-                    <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.bus?.route || "N/A"}</td>
-                    <td className="py-2 px-3">{driversMap[trip.bus?.driverId]?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.assistant?.name || trip.assistantName || "N/A"}</td>
-                    <td className="py-2 px-3">{trip.session || "N/A"}</td>
-                    <td className="py-2 px-3">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-medium ${
-                          trip.status === "CHECKED_OUT"
-                            ? "bg-green-100 text-green-700"
-                            : trip.status === "CHECKED_IN"
-                            ? "bg-yellow-100 text-yellow-700"
-                            : "bg-gray-100 text-gray-600"
-                        }`}
-                      >
-                        {trip.status || "UNKNOWN"}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3">
-                      {manifestLocations[trip.id] ? (
-                        typeof manifestLocations[trip.id] === "string" ? (
-                          manifestLocations[trip.id]
-                        ) : (
+                {paginatedTrips.map((trip, idx) => {
+                  const busId = trip.busId ?? trip.bus?.id;
+                  const live = busId != null ? liveByBusId.get(Number(busId)) : null;
+                  return (
+                    <tr
+                      key={trip.id}
+                      className="border-b last:border-0 hover:bg-gray-50 transition cursor-pointer"
+                      onClick={() => live && selectAndCenterBus(live)}
+                    >
+                      <td className="py-2 px-3">{(tripPage - 1) * rowsPerPage + idx + 1}</td>
+                      <td className="py-2 px-3">{trip.bus?.name || "N/A"}</td>
+                      <td className="py-2 px-3">{trip.bus?.route || "N/A"}</td>
+                      <td className="py-2 px-3">{driversMap[trip.bus?.driverId]?.name || "N/A"}</td>
+                      <td className="py-2 px-3">{trip.assistant?.name || trip.assistantName || "N/A"}</td>
+                      <td className="py-2 px-3">{trip.session || "N/A"}</td>
+                      <td className="py-2 px-3">
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            trip.status === "CHECKED_OUT"
+                              ? "bg-green-100 text-green-700"
+                              : trip.status === "CHECKED_IN"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          {trip.status || "UNKNOWN"}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3">
+                        {live ? (
                           <>
-                            <div>{manifestLocations[trip.id].address || "Loading..."}</div>
+                            <div>{tripAddresses[trip.id] || "Loading..."}</div>
                             <div className="text-xs text-muted-foreground">
-                              {manifestLocations[trip.id].imei ? `IMEI: ${manifestLocations[trip.id].imei}` : ""}
-                              {manifestLocations[trip.id].timestamp ? ` • ${new Date(manifestLocations[trip.id].timestamp).toLocaleString()}` : ""}
+                              {live.lastUpdate ? `• ${new Date(live.lastUpdate).toLocaleTimeString()}` : ""}
                             </div>
                           </>
-                        )
-                      ) : (
-                        <div className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading location...
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        ) : (
+                          <span className="text-gray-400 text-xs">No live GPS</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -631,8 +455,10 @@ export default function Dashboard() {
 
       {/* Map View */}
       <div className="mt-8">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Trip Locations Map</h2>
+        <h2 className="text-lg font-semibold text-gray-700 mb-2">Live Fleet Map</h2>
+        <p className="text-xs text-muted-foreground mb-2">Click a bus (on the map, or in the trip table above) to center on it.</p>
         <MapContainer
+          ref={mapRef}
           center={[-1.04544, 37.09609]}
           zoom={12}
           style={{ height: "400px", width: "100%" }}
@@ -641,43 +467,26 @@ export default function Dashboard() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {todaysManifests.map((m: any) => {
-            // prefer resolved manifestLocations map entry
-            const resolved = manifestLocations[m.id];
-            let lat: number | undefined;
-            let lon: number | undefined;
-            let popupAddress = "";
-
-            if (typeof resolved === "object" && resolved?.latitude && resolved?.longitude) {
-              lat = resolved.latitude;
-              lon = resolved.longitude;
-              popupAddress = resolved.address || "";
-            } else {
-              // fallback to existing manifest/bus coordinates if any
-              const candidateLat = m.latitude ?? m.bus?.latitude;
-              const candidateLon = m.longitude ?? m.bus?.longitude;
-              if (candidateLat && candidateLon) {
-                lat = candidateLat;
-                lon = candidateLon;
-                popupAddress = typeof resolved === "string" ? resolved : "";
-              }
-            }
-
-            if (!lat || !lon) return null;
-
-            return (
-              <Marker key={m.id} position={[lat, lon]} icon={busIcon}>
-                <Popup>
-                  <strong>Bus:</strong> {m.bus?.name || "N/A"} <br />
-                  <strong>Driver:</strong> {driversMap[m.bus?.driverId]?.name || "N/A"} <br />
-                  <strong>Assistant:</strong> {m.assistant?.name || "N/A"} <br />
-                  <strong>Status:</strong> {m.status || "N/A"} <br />
-                  <strong>Session:</strong> {m.session || "N/A"} <br />
-                  <strong>Drop Off:</strong> {popupAddress || "Loading..."}
-                </Popup>
-              </Marker>
-            );
-          })}
+          <FitAllBuses positions={allPositions} />
+          {mappableBuses.map((bus: any) => (
+            <Marker
+              key={bus.busId}
+              position={[bus.lat, bus.lng]}
+              icon={createBusIcon(bus, selectedBusId === bus.busId)}
+              eventHandlers={{ click: () => selectAndCenterBus(bus) }}
+            >
+              <Popup>
+                <strong>Bus:</strong> {bus.plateNumber || "N/A"} <br />
+                <strong>Speed:</strong> {bus.speed ?? 0} km/h <br />
+                <strong>Driver:</strong> {driversMap[bus.driverId]?.name || "N/A"} <br />
+                {bus.lastUpdate && (
+                  <>
+                    <strong>Updated:</strong> {new Date(bus.lastUpdate).toLocaleTimeString()}
+                  </>
+                )}
+              </Popup>
+            </Marker>
+          ))}
         </MapContainer>
       </div>
     </div>
