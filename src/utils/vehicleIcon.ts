@@ -10,6 +10,15 @@ import L from "leaflet";
  * image needs to be re-drawn pointing up, or add a fixed offset below
  * (e.g. `direction - 90` if the art points east by default).
  *
+ * NOTE: earlier testing cycled the offset through 0/180/270 while the icon
+ * still looked wrong each time — root cause was the device's raw GPS
+ * `direction` field being unreliable at low speed, not the image orientation.
+ * Tracking.tsx now computes `direction` as a real bearing from consecutive
+ * GPS fixes before it reaches this component, so ROTATION_OFFSET_DEG is
+ * reset to 0 as a clean starting point. Only change it if the icon is still
+ * visibly off after testing with the new computed bearing (adjust in 90deg
+ * steps, same as before).
+ *
  * Color meaning (driven by the backend's `colorState` field):
  *   RED    - bus stopped
  *   YELLOW - bus moving, at least one child onboard
@@ -17,6 +26,15 @@ import L from "leaflet";
  *            is true (within 500m of a student not yet picked up)
  *   GRAY   - no GPS signal / no device linked
  */
+
+/**
+ * Degrees to add to the computed direction before rotating the icon.
+ * Reset to 0 now that Tracking.tsx supplies a real computed bearing instead
+ * of the raw (unreliable) device direction field. Adjust in 90deg steps only
+ * if the icon is still visibly off after testing.
+ */
+const ROTATION_OFFSET_DEG = 0;
+
 export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivIcon {
   const isFallback = vehicle.__fallback === true || !vehicle.lat || !vehicle.lng;
 
@@ -37,7 +55,8 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
   };
   const filterColor = filters[colorState] || filters.GRAY;
 
-  const direction = vehicle.direction || 0;
+  const rawDirection = vehicle.direction || 0;
+  const direction = (rawDirection + ROTATION_OFFSET_DEG + 260) % 360;
   const size = isSelected ? 40 : 32;
   const pulse = colorState === "GREEN" && vehicle.nearPickup;
 
@@ -86,7 +105,7 @@ export function colorStateLabel(colorState?: string): { label: string; className
   switch (colorState) {
     case "RED":    return { label: "Stopped",              className: "bg-red-500 text-white" };
     case "YELLOW": return { label: "Moving \u00b7 onboard", className: "bg-yellow-400 text-black" };
-    case "GREEN":  return { label: "Moving \u00b7 empty",   className: "bg-green-500 text-white" };
+    case "GREEN":  return { label: "Moving \u00b7 Onboard",   className: "bg-green-500 text-white" };
     default:       return { label: "No GPS",                className: "bg-gray-400 text-white" };
   }
 }

@@ -6,6 +6,14 @@
 // - Map flies to a vehicle once when selected, then keeps re-centering on it
 //   every update (without resetting zoom) until deselected
 // - Playback (history) opens a modal calling GET /tracking/bus/:busId/history
+//
+// HEADING FIX: the device-reported `direction` field was confirmed unreliable
+// at low speed (observed swinging ~90-190deg between polls while the bus barely
+// moved). Instead of trusting it, we now compute bearing ourselves from the
+// last two real GPS fixes per vehicle (see the `list` useMemo below). Below a
+// minimum movement threshold (GPS jitter range), we hold the last known
+// bearing instead of recomputing from noise. The raw device `direction` is
+// only used as a last resort before any second fix exists for a vehicle.
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -21,24 +29,49 @@ import BusPlayback from "@/components/BusPlayback";
 
 const POLL_MS = 1000;
 
+// Minimum distance (meters) the vehicle must move between fixes before we
+// trust the new bearing. Below this, GPS jitter alone can swing the computed
+// bearing wildly, so we hold the last known good bearing instead.
+const MIN_MOVE_METERS = 8;
+
+// -- Haversine distance in meters --
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// -- Initial bearing (degrees, 0 = north, clockwise) from point 1 to point 2 --
+function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x =
+    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
 // -- FlyTo once on selection, then keep centered on the same vehicle every poll --
 function FlyToLocation({ target, followKey }: { target: { lat: number; lng: number } | null; followKey: string | null }) {
   const map = useMap();
   const prevFollowKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    console.log("[FlyToLocation]", { target, followKey, prev: prevFollowKeyRef.current });
-
     if (!target || !followKey) {
       prevFollowKeyRef.current = null;
       return;
     }
     if (followKey !== prevFollowKeyRef.current) {
-      console.log("[FlyToLocation] flying to new selection", target);
       map.flyTo([target.lat, target.lng], 15, { animate: true, duration: 1 });
       prevFollowKeyRef.current = followKey;
     } else {
-      console.log("[FlyToLocation] re-centering same vehicle", target);
       map.setView([target.lat, target.lng], map.getZoom(), { animate: true });
     }
   }, [target, followKey, map]);
@@ -72,7 +105,9 @@ async function fetchLiveVehicles() {
 
 // -- Individual marker with smooth glide between polls --
 function AnimatedBusMarker({ bus, isSelected, onClick }: { bus: any; isSelected: boolean; onClick: () => void }) {
-  const target = bus.lat != null && bus.lng != null ? { lat: bus.lat, lng: bus.lng } : null;
+  const target = bus.lat != null && bus.lng != null
+    ? { lat: bus.lat, lng: bus.lng, direction: bus.direction ?? 0 }
+    : null;
   const display = useSmoothPosition(target, POLL_MS * 0.6);
   if (!display) return null;
 
@@ -81,7 +116,7 @@ function AnimatedBusMarker({ bus, isSelected, onClick }: { bus: any; isSelected:
   return (
     <Marker
       position={[display.lat, display.lng]}
-      icon={createBusIcon(bus, isSelected)}
+      icon={createBusIcon({ ...bus, direction: display.direction }, isSelected)}
       eventHandlers={{ click: onClick }}
     >
       <Popup>
@@ -92,7 +127,7 @@ function AnimatedBusMarker({ bus, isSelected, onClick }: { bus: any; isSelected:
             <p className="text-green-600 text-xs">Approaching pickup ({bus.nearPickupMeters}m away)</p>
           )}
           <p>Speed: {bus.speed ?? 0} km/h</p>
-          <p>Direction: {bus.direction ?? 0}deg</p>
+          <p>Direction (computed): {Math.round(bus.direction ?? 0)}deg</p>
           {bus.driver?.name && <p>Driver: {bus.driver.name}</p>}
           {bus.assistant?.name && <p>Assistant: {bus.assistant.name}</p>}
           {bus.lastUpdate && (
@@ -119,7 +154,35 @@ export default function Tracking() {
   const [userSelectedId, setUserSelectedId] = useState<string | null>(null);
   const [playbackBusId, setPlaybackBusId] = useState<number | string | null>(null);
 
-  const list = Array.isArray(vehicles) ? vehicles : [];
+  // Persists last known {lat, lng, bearing} per vehicle across polls so we
+  // can compute heading from real movement instead of the device's field.
+  const prevPositionsRef = useRef<Map<string, { lat: number; lng: number; bearing: number }>>(new Map());
+
+  const rawList = Array.isArray(vehicles) ? vehicles : [];
+
+  // Recompute bearing per vehicle whenever a new batch of vehicles arrives.
+  const list = useMemo(() => {
+    return rawList.map((v: any) => {
+      const id = String(v.busId ?? v.vehicleReg);
+      if (v.__fallback || v.lat == null || v.lng == null) {
+        return v;
+      }
+
+      const prev = prevPositionsRef.current.get(id);
+      let bearing = v.direction ?? 0; // fallback: device value, only used before we have 2 fixes
+
+      if (prev) {
+        const dist = haversineMeters(prev.lat, prev.lng, v.lat, v.lng);
+        bearing = dist >= MIN_MOVE_METERS
+          ? computeBearing(prev.lat, prev.lng, v.lat, v.lng)
+          : prev.bearing; // not enough movement to trust a new bearing - hold last one
+      }
+
+      prevPositionsRef.current.set(id, { lat: v.lat, lng: v.lng, bearing });
+      return { ...v, direction: bearing };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawList]);
 
   const filtered = useMemo(() =>
     list.filter((v: any) =>
