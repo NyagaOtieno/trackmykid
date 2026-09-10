@@ -6,26 +6,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import L from "leaflet";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { X, Play, Pause, RotateCcw } from "lucide-react";
 import { getBusHistory } from "@/lib/api";
+import { createBusIcon } from "@/utils/vehicleIcon";
 
-type HistoryPoint = { lat: number; lng: number; speed?: number; timestamp: string };
+type HistoryPoint = { lat: number; lng: number; speed?: number; direction?: number; timestamp: string };
 
 interface Props {
   busId: number | string;
   busLabel?: string;
   onClose: () => void;
 }
-
-const busDotIcon = L.divIcon({
-  html: `<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:2px solid white;box-shadow:0 0 0 2px #2563eb;"></div>`,
-  className: "",
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
-});
 
 export default function BusPlayback({ busId, busLabel, onClose }: Props) {
   const [points, setPoints] = useState<HistoryPoint[]>([]);
@@ -104,7 +97,15 @@ export default function BusPlayback({ busId, busLabel, onClose }: Props) {
             <MapContainer center={center} zoom={14} style={{ height: "100%", width: "100%" }}>
               <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <Polyline positions={path} color="#2563eb" weight={3} opacity={0.6} />
-              {current && <Marker position={[current.lat, current.lng]} icon={busDotIcon} />}
+              {current && (
+                <Marker
+                  position={[current.lat, current.lng]}
+                  icon={createBusIcon({
+                    direction: current.direction ?? 0,
+                    colorState: (current.speed ?? 0) > 2 ? "GREEN" : "RED",
+                  })}
+                />
+              )}
             </MapContainer>
           )}
         </div>

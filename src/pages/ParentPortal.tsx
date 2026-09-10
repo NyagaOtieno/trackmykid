@@ -28,7 +28,7 @@ import BusPlayback from "@/components/BusPlayback";
 /* ---------------- Animated marker: glides between 30s polls ---------------- */
 function AnimatedStudentMarker({ v }: { v: any }) {
   const target = v.lat != null && v.lon != null ? { lat: Number(v.lat), lng: Number(v.lon) } : null;
-  const display = useSmoothPosition(target, 18000);
+  const display = useSmoothPosition(target, 600);
   if (!display) return null;
   const { label, className } = colorStateLabel(v.colorState);
 
@@ -139,7 +139,7 @@ export default function ParentPortal() {
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
-    refetchInterval: 15000,
+    refetchInterval: 1000,
   });
   const students: Student[] = Array.isArray(studentsData) ? studentsData : [];
   const myStudents = students.filter(

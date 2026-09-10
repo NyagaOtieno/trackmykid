@@ -18,7 +18,7 @@ import { createBusIcon, colorStateLabel } from "@/utils/vehicleIcon";
 import { useSmoothPosition } from "@/hooks/useSmoothPosition";
 import BusPlayback from "@/components/BusPlayback";
 
-const POLL_MS = 30000;
+const POLL_MS = 1000;
 
 // -- FlyTo: only fires when userSelected changes (not on every poll) --
 function FlyToLocation({ target }: { target: { lat: number; lng: number } | null }) {
@@ -136,7 +136,7 @@ export default function Tracking() {
         <div>
           <h2 className="text-3xl font-bold">Live Vehicle Tracking</h2>
           <p className="text-muted-foreground mt-1">
-            Real-time positions from GPS devices &middot; auto-refreshes every 30s
+            Real-time positions from GPS devices &middot; live updates every second
           </p>
         </div>
         <div className="flex items-center gap-3">
