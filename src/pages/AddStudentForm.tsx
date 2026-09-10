@@ -131,8 +131,16 @@ export default function AddStudentForm({ onSuccess }: { onSuccess?: () => void }
         parentPassword: form.parentPassword,
       };
 
+      // ✅ FIX: attach the Bearer token — this was missing and caused every
+      // submission to fail with 401, even though the token existed and was
+      // valid (the schools/buses fetch above already used it correctly).
+      const token = localStorage.getItem("token");
+
       await axios.post("https://tmk-api.joshpitah.co.ke/api/students", payload, {
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       toast.success("✅ Student added successfully!");
