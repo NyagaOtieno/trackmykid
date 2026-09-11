@@ -4,7 +4,7 @@
 // page and the Parent Portal. Calls GET /api/tracking/bus/:busId/history.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -18,6 +18,16 @@ interface Props {
   busId: number | string;
   busLabel?: string;
   onClose: () => void;
+}
+
+// Keeps the map centered on the current playback point as it advances,
+// without resetting zoom — same pattern used on the live tracking map.
+function FlyToLocation({ position }: { position: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (position) map.setView(position, map.getZoom(), { animate: true });
+  }, [position, map]);
+  return null;
 }
 
 export default function BusPlayback({ busId, busLabel, onClose }: Props) {
@@ -37,8 +47,7 @@ export default function BusPlayback({ busId, busLabel, onClose }: Props) {
       setError(null);
       try {
         const res = await getBusHistory(busId, 200);
-        console.log("[BusPlayback] busId:", busId, "response:", res);
-        const raw: HistoryPoint[] = Array.isArray(res?.data) ? res.data : [];
+        const raw: HistoryPoint[] = Array.isArray(res) ? res : [];
         const valid = raw.filter((p) => p.lat != null && p.lng != null);
         // Oldest -> newest, so playback moves forward in time
         valid.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -97,6 +106,7 @@ export default function BusPlayback({ busId, busLabel, onClose }: Props) {
           ) : (
             <MapContainer center={center} zoom={14} style={{ height: "100%", width: "100%" }}>
               <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <FlyToLocation position={current ? [current.lat, current.lng] : null} />
               <Polyline positions={path} color="#2563eb" weight={3} opacity={0.6} />
               {current && (
                 <Marker

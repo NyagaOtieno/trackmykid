@@ -57,7 +57,7 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
 
   const rawDirection = vehicle.direction || 0;
   const direction = (rawDirection + ROTATION_OFFSET_DEG + 260) % 360;
-  const size = isSelected ? 40 : 32;
+  const size = isSelected ? 50 : 38;
   const pulse = colorState === "GREEN" && vehicle.nearPickup;
 
   // The rotation itself is applied to an INNER div so the outer wrapper
