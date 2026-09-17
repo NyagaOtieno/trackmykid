@@ -3,105 +3,180 @@ import axios from "axios";
 // Backend list endpoints return { success, count, data }. Some legacy ones
 // return a raw array. This normalizes either shape to a plain array so
 // callers can always safely .filter()/.map() the result.
-const unwrap = (res: any) => (Array.isArray(res) ? res : res?.data ?? []);
+const unwrap = (res: any) => (Array.isArray(res) ? res : res?.data || []);
 
 // ✅ Create Axios instance using .env value or fallback
 const api = axios.create({
   baseURL:
     import.meta.env.VITE_API_URL?.trim() ||
     "https://tmk-api.joshpitah.co.ke/api",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+  },
+  // Without a timeout, a slow/unresponsive backend leaves any caller's
+  // useQuery stuck in isLoading forever (this was the "Tracking page
+  // hangs" bug — Tracking.tsx used a raw axios call with no timeout).
   timeout: 15000,
 });
 
-// ✅ Automatically attach Bearer token
+// ✅ Automatically attach Bearer token (if available)
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// ✅ Handle expired tokens
+// ✅ Handle expired tokens or unauthorized responses
+// This backend's authMiddleware (src/middleware/auth.js) returns 403 —
+// not the conventional 401 — for both an expired JWT ({ error: "Token
+// expired." }) and an invalid one ({ error: "Invalid token." }), because
+// tokens are signed with `expiresIn: "1d"`. Without this, a session that
+// outlives 24h just silently breaks every tenant-scoped request (403 on
+// students/buses/manifests/users/tracking) with no recovery — the user
+// sees a blank/broken page instead of being sent back to log in.
+const AUTH_FAILURE_MESSAGES = ["token expired.", "invalid token."];
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const serverMessage = (error.response?.data?.error || error.response?.data?.message || "")
+      .toString()
+      .toLowerCase();
+    const isAuthFailure =
+      status === 401 || (status === 403 && AUTH_FAILURE_MESSAGES.some((m) => serverMessage.includes(m)));
+
+    if (isAuthFailure) {
+      console.warn("⚠️ Session expired or unauthorized — logging out...");
       localStorage.removeItem("token");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-      window.location.href = "/";
+      window.location.href = "/"; // redirect to login
     }
     return Promise.reject(error);
   }
 );
 
 // ======================
-// LIVE TRACKING — polls every 5s in Tracking.tsx (admin)
-// GET /tracking/live-locations
-// Returns latest position per vehicle from LiveLocation table
-// ======================
-export const getLiveLocations = () =>
-  api.get("/tracking/live-locations").then((res) => unwrap(res.data));
-
-// ======================
-// BUS LOCATION HISTORY — for playback / history views only
-// GET /tracking/bus-locations  (returns BusLocation history rows)
-// Do NOT use for live tracking — it returns historical records and
-// will make the map jump as old coords get mixed with live coords.
-// ======================
-export const getBusLocationHistory = () =>
-  api.get("/tracking/bus-locations").then((res) => unwrap(res.data));
-
-// Alias kept for backward compat — points to LIVE, not history
-export const getBusLocations = getLiveLocations;
-
-// ======================
-// PER-STUDENT TRACKING — for ParentPortal
-// GET /tracking/student/:studentId
-// Returns { tripStatus, location: { lat, lng, speed, ... } | null }
-// Only returns location when child is CHECKED_IN (onboard)
-// ======================
-export const getStudentTracking = (studentId: number | string) =>
-  api.get(`/tracking/student/${studentId}`).then((res) => res.data);
-
-// ======================
-// OTHER DATA ENDPOINTS
+// GET / FETCH Functions
 // ======================
 export const getStudents = () => api.get("/students").then((res) => unwrap(res.data));
+
+// ✅ Fetch buses with expanded relations (driver, assistant, school)
 export const getBusesWithRelations = () =>
   api.get("/buses?includeRelations=true").then((res) => unwrap(res.data));
+
+// ✅ Simple buses list
 export const getBuses = () => api.get("/buses").then((res) => unwrap(res.data));
+
 export const getManifests = () => api.get("/manifests").then((res) => unwrap(res.data));
-export const syncTracking = () => api.get("/tracking/sync").then((res) => res.data);
-export const getAssistants = () => api.get("/users?role=ASSISTANT").then((res) => unwrap(res.data));
-export const getParents = () => api.get("/users?role=PARENT").then((res) => unwrap(res.data));
-export const getDrivers = () => api.get("/users?role=DRIVER").then((res) => unwrap(res.data));
-export const getAdmins = () => api.get("/users?role=ADMIN").then((res) => unwrap(res.data));
+
+// ✅ Tracking Routes
+export const getLiveLocations = () =>
+  api.get("/tracking/live-locations").then((res) => unwrap(res.data));
+export const syncTracking = () =>
+  api.get("/tracking/sync").then((res) => res.data);
+export const getBusLocations = () =>
+  api.get("/tracking/bus-locations").then((res) => unwrap(res.data));
+
+// ✅ User Role Routes
+export const getAssistants = () =>
+  api.get("/users?role=ASSISTANT").then((res) => unwrap(res.data));
+export const getParents = () =>
+  api.get("/users?role=PARENT").then((res) => unwrap(res.data));
+export const getDrivers = () =>
+  api.get("/users?role=DRIVER").then((res) => unwrap(res.data));
+export const getAdmins = () =>
+  api.get("/users?role=ADMIN").then((res) => unwrap(res.data));
 export const getSchools = () => api.get("/schools").then((res) => unwrap(res.data));
 
-// CRUD
+// ======================
+// CRUD Functions
+// ======================
+
+// ---------- Students ----------
 export const createStudent = (data: any) => api.post("/students", data);
-export const updateStudent = (id: number, data: any) => api.put(`/students/${id}`, data);
+export const updateStudent = (id: number, data: any) =>
+  api.put(`/students/${id}`, data);
 export const deleteStudent = (id: number) => api.delete(`/students/${id}`);
+
+// ---------- Buses ----------
 export const createBus = (data: any) => api.post("/buses", data);
-export const updateBus = (id: number, data: any) => api.put(`/buses/${id}`, data);
+export const updateBus = (id: number, data: any) =>
+  api.put(`/buses/${id}`, data);
 export const deleteBus = (id: number) => api.delete(`/buses/${id}`);
-export const addBus = (busData: any) => api.post("/buses", busData).then((res) => res.data);
+
+// ✅ Explicit `addBus` function for AddBusForm.tsx
+export const addBus = (busData: any) => api.post("/buses", busData).then(res => res.data);
+
+// ---------- Schools ----------
 export const createSchool = (data: any) => api.post("/schools", data);
-export const updateSchool = (id: number, data: any) => api.put(`/schools/${id}`, data);
+export const updateSchool = (id: number, data: any) =>
+  api.put(`/schools/${id}`, data);
 export const deleteSchool = (id: number) => api.delete(`/schools/${id}`);
+
+// ---------- Users ----------
 export const createUser = (data: any) => api.post("/users", data);
-export const updateUser = (id: number, data: any) => api.put(`/users/${id}`, data);
+export const updateUser = (id: number, data: any) =>
+  api.put(`/users/${id}`, data);
 export const deleteUser = (id: number) => api.delete(`/users/${id}`);
-export const createAssistant = (data: any) => createUser({ ...data, role: "ASSISTANT" });
-export const createParent = (data: any) => createUser({ ...data, role: "PARENT" });
-export const createDriver = (data: any) => createUser({ ...data, role: "DRIVER" });
-export const createAdmin = (data: any) => createUser({ ...data, role: "ADMIN" });
+
+// Role-specific helpers
+export const createAssistant = (data: any) =>
+  createUser({ ...data, role: "ASSISTANT" });
+export const createParent = (data: any) =>
+  createUser({ ...data, role: "PARENT" });
+export const createDriver = (data: any) =>
+  createUser({ ...data, role: "DRIVER" });
+export const createAdmin = (data: any) =>
+  createUser({ ...data, role: "ADMIN" });
+
+// ---------- Manifests ----------
 export const createManifest = (data: any) => api.post("/manifests", data);
-export const updateManifest = (id: number, data: any) => api.put(`/manifests/${id}`, data);
+export const updateManifest = (id: number, data: any) =>
+  api.put(`/manifests/${id}`, data);
 export const deleteManifest = (id: number) => api.delete(`/manifests/${id}`);
 
+// ======================
+// Auth — first-login / password
+// ======================
+// POST /api/auth/first-login/verify-otp — completes first-time setup.
+// Body: {otp, newPassword}. Requires the Bearer token from the initial
+// /auth/login response (interceptor above attaches it automatically).
+export const verifyFirstLoginOtp = (data: { otp: string; newPassword: string }) =>
+  api.post("/auth/first-login/verify-otp", data).then((res) => res.data);
+
+// POST /api/auth/first-login/resend-otp — resend if the OTP expired/missed.
+export const resendFirstLoginOtp = () =>
+  api.post("/auth/first-login/resend-otp").then((res) => res.data);
+
+// POST /api/auth/change-password — voluntary password change once logged in.
+export const changePassword = (data: { currentPassword: string; newPassword: string }) =>
+  api.post("/auth/change-password", data).then((res) => res.data);
+
+// ======================
+// Push notifications
+// ======================
+// POST /api/push/register-token — body: {expoPushToken}.
+// NOTE: this expects an Expo push token, which only exists inside an
+// Expo/React Native app shell — a plain browser has no such token. This
+// helper is here so it's ready to call from a future Expo/Capacitor
+// wrapper of this app, but nothing in this web build calls it yet since
+// there's nothing valid to pass it. If this app is ever wrapped for
+// mobile via Expo, call this after login with the token Expo provides.
+export const registerPushToken = (expoPushToken: string) =>
+  api.post("/push/register-token", { expoPushToken }).then((res) => res.data);
+
+// GET /api/notifications — parent's in-app notification feed (proximity
+// pickup/drop-off alerts, etc).
+export const getNotifications = () =>
+  api.get("/notifications").then((res) => unwrap(res.data));
+
+// ======================
+// Export default API instance
+// ======================
 export default api;

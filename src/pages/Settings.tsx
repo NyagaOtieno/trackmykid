@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { getConfig, setConfig } from '@/lib/config';
+import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
 
 export default function Settings() {
   const [useMockData, setUseMockData] = useState(true);
@@ -100,6 +101,18 @@ export default function Settings() {
               <span className="text-sm font-medium">Status</span>
               <span className="text-sm text-success">● Active</span>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Account</CardTitle>
+            <CardDescription>
+              Manage your login credentials
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ChangePasswordDialog />
           </CardContent>
         </Card>
 
