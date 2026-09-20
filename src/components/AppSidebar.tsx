@@ -25,10 +25,12 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { open } = useSidebar();
+  const { open: desktopOpen, isMobile, setOpenMobile } = useSidebar();
+  // In the mobile drawer the sidebar is always full-width, so always show labels
+  const open = isMobile ? true : desktopOpen;
 
   return (
-    <Sidebar className={open ? 'w-60' : 'w-14'}>
+    <Sidebar>
       <SidebarContent>
         <div className="p-4 border-b border-sidebar-border">
           {open ? (
@@ -50,6 +52,10 @@ export function AppSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
+                      onClick={() => {
+                        // Close the mobile drawer after picking a page
+                        if (isMobile) setOpenMobile(false);
+                      }}
                       className={({ isActive }) =>
                         isActive
                           ? 'bg-sidebar-accent text-sidebar-primary font-medium'
