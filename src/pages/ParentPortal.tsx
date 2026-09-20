@@ -19,10 +19,9 @@ import {
 import { getCurrentUser } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { NotificationsBell } from "@/components/NotificationsBell";
-import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 // Same icon builder Tracking.tsx (admin) uses, so parent and admin
 // render the identical bus marker instead of the old mismatched
 // flaticon PNGs (which also had inverted moving/stopped colors).
@@ -47,6 +46,36 @@ function FocusOnSelected({ target }: { target: { lat: number; lon: number } | nu
     if (target) map.flyTo([target.lat, target.lon], 16, { duration: 1 });
   }, [target, map]);
   return null;
+}
+
+/* ---------------- Bearing computation (same approach as Tracking.tsx) ----------------
+   The device's raw direction/course field was confirmed unreliable at low
+   speed (swings ~90-190deg between polls while barely moving) — see the
+   comment block in Tracking.tsx. Rather than trust it directly, we compute
+   bearing ourselves from consecutive real GPS fixes per bus, holding the
+   last known bearing when movement is below a jitter-range threshold. */
+const MIN_MOVE_METERS = 8;
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x =
+    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
@@ -110,6 +139,11 @@ export default function ParentPortal() {
   const currentUser = getCurrentUser();
   const parentUserId = currentUser?.id;
   const [selectedStudentId, setSelectedStudentId] = useState<string>("all");
+
+  // Persists last known {lat, lng, bearing} per BUS (not per-student — two
+  // siblings on the same bus should compute/share one consistent bearing)
+  // across polls, same pattern as Tracking.tsx.
+  const prevBusPositionsRef = useRef<Map<number, { lat: number; lng: number; bearing: number }>>(new Map());
 
   const handleLogout = () => {
     localStorage.removeItem("parent");
@@ -232,6 +266,8 @@ export default function ParentPortal() {
     status: "CHECKED_IN" | "CHECKED_OUT" | "UNKNOWN";
     lat?: number;
     lon?: number;
+    busId?: number;
+    direction?: number;
     readableLocation: string;
     busName?: string;
     plate?: string;
@@ -242,74 +278,106 @@ export default function ParentPortal() {
     movementState?: string;
   };
 
-  const studentViews: StudentView[] = myStudents.map((s: any) => {
-    const latest = latestManifestByStudent.get(s.id);
-    const busCandidate =
-      latest?.bus ?? s.bus ?? (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined);
+  // Wrapped in useMemo (keyed on the actual tracking/manifest/student data,
+  // NOT selectedStudentId) so the bearing-history ref only advances when
+  // there's genuinely new GPS data — not on every dropdown click, which
+  // would otherwise corrupt the "previous fix" used for bearing math.
+  const studentViews: StudentView[] = useMemo(() => {
+    return myStudents.map((s: any) => {
+      const latest = latestManifestByStudent.get(s.id);
+      const busCandidate =
+        latest?.bus ?? s.bus ?? (typeof latest?.busId === "number" ? busesById.get(Number(latest.busId)) : undefined);
 
-    const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
+      const rawPlate = busCandidate?.plateNumber?.toString().trim() || "";
+      const busId: number | undefined = busCandidate?.id ?? (typeof latest?.busId === "number" ? latest.busId : undefined);
 
-    let lat: number | undefined = undefined;
-    let lon: number | undefined = undefined;
-    let readableLocation = "Not onboard";
-    let liveSource: StudentView["liveSource"] = "student";
-    let lastSeen: string | undefined = undefined;
-    let movementState: string | undefined = undefined;
+      let lat: number | undefined = undefined;
+      let lon: number | undefined = undefined;
+      let readableLocation = "Not onboard";
+      let liveSource: StudentView["liveSource"] = "student";
+      let lastSeen: string | undefined = undefined;
+      let movementState: string | undefined = undefined;
+      let rawDirection: number | undefined = undefined;
 
-    let status: StudentView["status"] = "UNKNOWN";
-    if (latest?.status) {
-      const st = (latest.status ?? "").toString().toUpperCase();
-      if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
-      else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
-    } else {
-      if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
-      else if (latest?.alightingTime) status = "CHECKED_OUT";
-    }
+      let status: StudentView["status"] = "UNKNOWN";
+      if (latest?.status) {
+        const st = (latest.status ?? "").toString().toUpperCase();
+        if (["CHECKED_IN", "ONBOARDED", "ONBOARD"].includes(st)) status = "CHECKED_IN";
+        else if (["CHECKED_OUT", "OFFBOARDED"].includes(st)) status = "CHECKED_OUT";
+      } else {
+        if (latest?.boardingTime && !latest?.alightingTime) status = "CHECKED_IN";
+        else if (latest?.alightingTime) status = "CHECKED_OUT";
+      }
 
-    // Only ever place a marker while the child is genuinely onboard right
-    // now. Both branches below are gated on status === "CHECKED_IN" so an
-    // offboarded child's last-known (boarding-time) coordinates can never
-    // leak onto the map after they've been checked out.
-    const tracking = childTracking[s.id];
-    if (status === "CHECKED_IN" && tracking?.tripStatus === "ONBOARD" && tracking?.location) {
-      lat = tracking.location.lat != null ? Number(tracking.location.lat) : undefined;
-      lon = tracking.location.lng != null ? Number(tracking.location.lng) : undefined;
-      readableLocation = s.name;
-      liveSource = "device";
-      lastSeen = tracking.location.lastUpdate;
-      movementState = tracking.location.movementState ?? "unknown";
-    }
+      // Only ever place a marker while the child is genuinely onboard right
+      // now. Both branches below are gated on status === "CHECKED_IN" so an
+      // offboarded child's last-known (boarding-time) coordinates can never
+      // leak onto the map after they've been checked out.
+      const tracking = childTracking[s.id];
+      if (status === "CHECKED_IN" && tracking?.tripStatus === "ONBOARD" && tracking?.location) {
+        lat = tracking.location.lat != null ? Number(tracking.location.lat) : undefined;
+        lon = tracking.location.lng != null ? Number(tracking.location.lng) : undefined;
+        readableLocation = s.name;
+        liveSource = "device";
+        lastSeen = tracking.location.lastUpdate;
+        movementState = tracking.location.movementState ?? "unknown";
+        // Backend's getLiveLocationForBus() includes `direction` (mapped
+        // from the device's `course` field) in this same location object —
+        // it just wasn't being read here before. This is the RAW value;
+        // smoothing happens below.
+        rawDirection =
+          tracking.location.direction != null ? Number(tracking.location.direction) : undefined;
+      }
 
-    if (status === "CHECKED_IN" && (!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
-      lat = Number(latest.latitude);
-      lon = Number(latest.longitude);
-      readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
-      liveSource = "manifest";
-      movementState = "unknown";
-    }
+      if (status === "CHECKED_IN" && (!lat || !lon) && latest?.latitude != null && latest?.longitude != null) {
+        lat = Number(latest.latitude);
+        lon = Number(latest.longitude);
+        readableLocation = latest?.bus?.route ?? latest?.bus?.name ?? "Manifest location";
+        liveSource = "manifest";
+        movementState = "unknown";
+      }
 
-    const driverName =
-      busCandidate?.driver?.name ?? (busCandidate?.driverId ? usersById.get(Number(busCandidate.driverId))?.name : undefined) ?? "N/A";
-    const assistantName =
-      busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
+      // Compute a smoothed bearing from consecutive real fixes, same
+      // approach as Tracking.tsx, keyed per bus so siblings on the same
+      // bus share one consistent heading instead of computing it twice
+      // (or disagreeing) from what's really one vehicle's movement.
+      let direction = rawDirection ?? 0;
+      if (busId != null && lat != null && lon != null) {
+        const prev = prevBusPositionsRef.current.get(busId);
+        if (prev) {
+          const dist = haversineMeters(prev.lat, prev.lng, lat, lon);
+          direction = dist >= MIN_MOVE_METERS
+            ? computeBearing(prev.lat, prev.lng, lat, lon)
+            : prev.bearing; // not enough movement to trust a new bearing — hold last one
+        }
+        prevBusPositionsRef.current.set(busId, { lat, lng: lon, bearing: direction });
+      }
 
+      const driverName =
+        busCandidate?.driver?.name ?? (busCandidate?.driverId ? usersById.get(Number(busCandidate.driverId))?.name : undefined) ?? "N/A";
+      const assistantName =
+        busCandidate?.assistant?.name ?? (busCandidate?.assistantId ? usersById.get(Number(busCandidate.assistantId))?.name : undefined) ?? "N/A";
 
-    return {
-      student: s,
-      manifest: latest,
-      status,
-      lat,
-      lon,
-      readableLocation,
-      busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
-      plate: rawPlate || "N/A",
-      driver: driverName,
-      assistant: assistantName,
-      lastSeen,
-      liveSource,
-      movementState,
-    };
-  });
+      return {
+        student: s,
+        manifest: latest,
+        status,
+        lat,
+        lon,
+        busId,
+        direction,
+        readableLocation,
+        busName: busCandidate?.name ?? latest?.bus?.name ?? "No Bus Assigned",
+        plate: rawPlate || "N/A",
+        driver: driverName,
+        assistant: assistantName,
+        lastSeen,
+        liveSource,
+        movementState,
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myStudents, latestManifestByStudent, busesById, usersById, childTracking]);
 
   const onboardWithCoords = studentViews.filter(
     (v) =>
@@ -364,13 +432,6 @@ export default function ParentPortal() {
             <span className="text-sm text-muted-foreground">
               Welcome, {currentUser?.name}
             </span>
-            <ChangePasswordDialog
-              trigger={
-                <button className="px-3 py-1 border rounded-lg text-sm hover:bg-muted">
-                  Change Password
-                </button>
-              }
-            />
             <button
               onClick={handleLogout}
               className="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -500,10 +561,12 @@ export default function ParentPortal() {
               {markersWithCoords.map((v) => {
                 // Same icon builder as the admin Tracking page: colored by
                 // movementState, grayed out when this isn't a live device
-                // fix (e.g. falling back to a manifest-recorded location).
+                // fix, and now rotated toward the bus's actual computed
+                // heading (was previously always defaulting to 0/north).
                 const icon = createBusIcon({
                   plateNumber: v.plate,
                   movementState: v.movementState,
+                  direction: v.direction,
                   lat: v.lat,
                   lng: v.lon,
                   __fallback: v.liveSource !== "device",

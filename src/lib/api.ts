@@ -14,9 +14,11 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -28,40 +30,57 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       console.warn("⚠️ Session expired or unauthorized — logging out...");
+
       localStorage.removeItem("token");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-      window.location.href = "/"; // redirect to login
+
+      window.location.href = "/";
     }
+
     return Promise.reject(error);
   }
 );
 
 // ======================
-// Helper: unwrap { success, data } or { success, count, data } → plain array/value
-// Backend consistently wraps list responses this way — normalize once, here.
+// Helpers
 // ======================
+
+// Normalize list responses:
+// { success, data: [...] } → [...]
+// { success, count, data: [...] } → [...]
 function unwrapList(d: any) {
   if (Array.isArray(d)) return d;
   if (Array.isArray(d?.data)) return d.data;
   return [];
 }
 
+// Normalize single-object responses:
+// { success, data: {...} } → {...}
 function unwrapItem(d: any) {
-  // for single-object responses like { success, data: {...} }
-  if (d?.data && typeof d.data === "object" && !Array.isArray(d.data)) return d.data;
+  if (
+    d?.data &&
+    typeof d.data === "object" &&
+    !Array.isArray(d.data)
+  ) {
+    return d.data;
+  }
+
   return d;
 }
 
 // ======================
 // GET / FETCH Functions
 // ======================
+
 export const getStudents = () =>
   api.get("/students").then((res) => unwrapList(res.data));
 
-// ✅ Fetch buses with expanded relations (driver, assistant, school)
+// ✅ Fetch buses with expanded relations
 export const getBusesWithRelations = () =>
-  api.get("/buses?includeRelations=true").then((res) => unwrapList(res.data));
+  api
+    .get("/buses?includeRelations=true")
+    .then((res) => unwrapList(res.data));
 
 // ✅ Simple buses list
 export const getBuses = () =>
@@ -70,86 +89,209 @@ export const getBuses = () =>
 export const getManifests = () =>
   api.get("/manifests").then((res) => unwrapList(res.data));
 
-// ✅ Tracking Routes
+// ======================
+// Tracking Routes
+// ======================
+
 export const getLiveLocations = () =>
-  api.get("/tracking/live-locations").then((res) => unwrapList(res.data));
+  api
+    .get("/tracking/live-locations")
+    .then((res) => unwrapList(res.data));
+
 export const syncTracking = () =>
   api.get("/tracking/sync").then((res) => res.data);
+
 export const getBusLocations = () =>
-  api.get("/tracking/bus-locations").then((res) => unwrapList(res.data));
+  api
+    .get("/tracking/bus-locations")
+    .then((res) => unwrapList(res.data));
+
 export const getBusLocation = (busId: number | string) =>
-  api.get(`/tracking/bus/${busId}`).then((res) => unwrapItem(res.data));
+  api
+    .get(`/tracking/bus/${busId}`)
+    .then((res) => unwrapItem(res.data));
+
 export const getStudentTracking = (studentId: number | string) =>
-  api.get(`/tracking/student/${studentId}`).then((res) => unwrapItem(res.data));
+  api
+    .get(`/tracking/student/${studentId}`)
+    .then((res) => unwrapItem(res.data));
 
-// ✅ Playback / history — used by the Playback controls (admin + parent)
-export const getBusHistory = (busId: number | string, limit: number = 200) =>
-  api.get(`/tracking/bus/${busId}/history`, { params: { limit } }).then((res) => unwrapList(res.data));
+// ✅ Playback / history
+export const getBusHistory = (
+  busId: number | string,
+  limit: number = 200
+) =>
+  api
+    .get(`/tracking/bus/${busId}/history`, {
+      params: { limit },
+    })
+    .then((res) => unwrapList(res.data));
 
-// ✅ Trip start/end per session for a bus on a given day (defaults to today)
-export const getBusTrips = (busId: number | string, date?: string) =>
-  api.get(`/tracking/bus/${busId}/trips`, { params: date ? { date } : {} }).then((res) => res.data);
+// ✅ Trip start/end per session for a bus on a given day
+export const getBusTrips = (
+  busId: number | string,
+  date?: string
+) =>
+  api
+    .get(`/tracking/bus/${busId}/trips`, {
+      params: date ? { date } : {},
+    })
+    .then((res) => res.data);
 
-// ✅ User Role Routes
+// ======================
+// User Role Routes
+// ======================
+
 export const getAssistants = () =>
-  api.get("/users?role=ASSISTANT").then((res) => unwrapList(res.data));
+  api
+    .get("/users?role=ASSISTANT")
+    .then((res) => unwrapList(res.data));
+
 export const getParents = () =>
-  api.get("/users?role=PARENT").then((res) => unwrapList(res.data));
+  api
+    .get("/users?role=PARENT")
+    .then((res) => unwrapList(res.data));
+
 export const getDrivers = () =>
-  api.get("/users?role=DRIVER").then((res) => unwrapList(res.data));
+  api
+    .get("/users?role=DRIVER")
+    .then((res) => unwrapList(res.data));
+
 export const getAdmins = () =>
-  api.get("/users?role=ADMIN").then((res) => unwrapList(res.data));
+  api
+    .get("/users?role=ADMIN")
+    .then((res) => unwrapList(res.data));
+
 export const getSchools = () =>
-  api.get("/schools").then((res) => unwrapList(res.data));
+  api
+    .get("/schools")
+    .then((res) => unwrapList(res.data));
 
 // ======================
 // CRUD Functions
 // ======================
 
 // ---------- Students ----------
-export const createStudent = (data: any) => api.post("/students", data);
-export const updateStudent = (id: number, data: any) =>
+
+export const createStudent = (data: any) =>
+  api.post("/students", data);
+
+export const updateStudent = (
+  id: number,
+  data: any
+) =>
   api.put(`/students/${id}`, data);
-export const deleteStudent = (id: number) => api.delete(`/students/${id}`);
+
+export const deleteStudent = (id: number) =>
+  api.delete(`/students/${id}`);
 
 // ---------- Buses ----------
-export const createBus = (data: any) => api.post("/buses", data);
-export const updateBus = (id: number, data: any) =>
-  api.put(`/buses/${id}`, data);
-export const deleteBus = (id: number) => api.delete(`/buses/${id}`);
 
-// ✅ Explicit `addBus` function for AddBusForm.tsx
-export const addBus = (busData: any) => api.post("/buses", busData).then(res => res.data);
+export const createBus = (data: any) =>
+  api.post("/buses", data);
+
+export const updateBus = (
+  id: number,
+  data: any
+) =>
+  api.put(`/buses/${id}`, data);
+
+export const deleteBus = (id: number) =>
+  api.delete(`/buses/${id}`);
+
+// ✅ Explicit addBus function for AddBusForm.tsx
+export const addBus = (busData: any) =>
+  api
+    .post("/buses", busData)
+    .then((res) => res.data);
 
 // ---------- Schools ----------
-export const createSchool = (data: any) => api.post("/schools", data);
-export const updateSchool = (id: number, data: any) =>
+
+export const createSchool = (data: any) =>
+  api.post("/schools", data);
+
+export const updateSchool = (
+  id: number,
+  data: any
+) =>
   api.put(`/schools/${id}`, data);
-export const deleteSchool = (id: number) => api.delete(`/schools/${id}`);
+
+export const deleteSchool = (id: number) =>
+  api.delete(`/schools/${id}`);
 
 // ---------- Users ----------
-export const createUser = (data: any) => api.post("/users", data);
-export const updateUser = (id: number, data: any) =>
+
+export const createUser = (data: any) =>
+  api.post("/users", data);
+
+export const updateUser = (
+  id: number,
+  data: any
+) =>
   api.put(`/users/${id}`, data);
-export const deleteUser = (id: number) => api.delete(`/users/${id}`);
+
+export const deleteUser = (id: number) =>
+  api.delete(`/users/${id}`);
 
 // Role-specific helpers
+
 export const createAssistant = (data: any) =>
-  createUser({ ...data, role: "ASSISTANT" });
+  createUser({
+    ...data,
+    role: "ASSISTANT",
+  });
+
 export const createParent = (data: any) =>
-  createUser({ ...data, role: "PARENT" });
+  createUser({
+    ...data,
+    role: "PARENT",
+  });
+
 export const createDriver = (data: any) =>
-  createUser({ ...data, role: "DRIVER" });
+  createUser({
+    ...data,
+    role: "DRIVER",
+  });
+
 export const createAdmin = (data: any) =>
-  createUser({ ...data, role: "ADMIN" });
+  createUser({
+    ...data,
+    role: "ADMIN",
+  });
 
 // ---------- Manifests ----------
-export const createManifest = (data: any) => api.post("/manifests", data);
-export const updateManifest = (id: number, data: any) =>
+
+export const createManifest = (data: any) =>
+  api.post("/manifests", data);
+
+export const updateManifest = (
+  id: number,
+  data: any
+) =>
   api.put(`/manifests/${id}`, data);
-export const deleteManifest = (id: number) => api.delete(`/manifests/${id}`);
+
+export const deleteManifest = (id: number) =>
+  api.delete(`/manifests/${id}`);
+
+// ======================
+// Notifications
+// ======================
+
+export const getUnreadNotificationCount = () =>
+  api
+    .get("/notifications/unread-count")
+    .then((res) => res.data);
+
+export const markNotificationRead = (
+  id: number | string
+) =>
+  api
+    .patch(`/notifications/${id}/read`)
+    .then((res) => res.data);
 
 // ======================
 // Export default API instance
 // ======================
+
 export default api;
+

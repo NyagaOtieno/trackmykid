@@ -1,11 +1,11 @@
-import axios from "axios";
+﻿import axios from "axios";
 
 // Backend list endpoints return { success, count, data }. Some legacy ones
 // return a raw array. This normalizes either shape to a plain array so
 // callers can always safely .filter()/.map() the result.
 const unwrap = (res: any) => (Array.isArray(res) ? res : res?.data || []);
 
-// ✅ Create Axios instance using .env value or fallback
+// âœ… Create Axios instance using .env value or fallback
 const api = axios.create({
   baseURL:
     import.meta.env.VITE_API_URL?.trim() ||
@@ -15,11 +15,11 @@ const api = axios.create({
   },
   // Without a timeout, a slow/unresponsive backend leaves any caller's
   // useQuery stuck in isLoading forever (this was the "Tracking page
-  // hangs" bug — Tracking.tsx used a raw axios call with no timeout).
+  // hangs" bug â€” Tracking.tsx used a raw axios call with no timeout).
   timeout: 15000,
 });
 
-// ✅ Automatically attach Bearer token (if available)
+// âœ… Automatically attach Bearer token (if available)
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -31,13 +31,13 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// ✅ Handle expired tokens or unauthorized responses
-// This backend's authMiddleware (src/middleware/auth.js) returns 403 —
-// not the conventional 401 — for both an expired JWT ({ error: "Token
+// âœ… Handle expired tokens or unauthorized responses
+// This backend's authMiddleware (src/middleware/auth.js) returns 403 â€”
+// not the conventional 401 â€” for both an expired JWT ({ error: "Token
 // expired." }) and an invalid one ({ error: "Invalid token." }), because
 // tokens are signed with `expiresIn: "1d"`. Without this, a session that
 // outlives 24h just silently breaks every tenant-scoped request (403 on
-// students/buses/manifests/users/tracking) with no recovery — the user
+// students/buses/manifests/users/tracking) with no recovery â€” the user
 // sees a blank/broken page instead of being sent back to log in.
 const AUTH_FAILURE_MESSAGES = ["token expired.", "invalid token."];
 api.interceptors.response.use(
@@ -51,7 +51,7 @@ api.interceptors.response.use(
       status === 401 || (status === 403 && AUTH_FAILURE_MESSAGES.some((m) => serverMessage.includes(m)));
 
     if (isAuthFailure) {
-      console.warn("⚠️ Session expired or unauthorized — logging out...");
+      console.warn("âš ï¸ Session expired or unauthorized â€” logging out...");
       localStorage.removeItem("token");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
@@ -66,16 +66,16 @@ api.interceptors.response.use(
 // ======================
 export const getStudents = () => api.get("/students").then((res) => unwrap(res.data));
 
-// ✅ Fetch buses with expanded relations (driver, assistant, school)
+// âœ… Fetch buses with expanded relations (driver, assistant, school)
 export const getBusesWithRelations = () =>
   api.get("/buses?includeRelations=true").then((res) => unwrap(res.data));
 
-// ✅ Simple buses list
+// âœ… Simple buses list
 export const getBuses = () => api.get("/buses").then((res) => unwrap(res.data));
 
 export const getManifests = () => api.get("/manifests").then((res) => unwrap(res.data));
 
-// ✅ Tracking Routes
+// âœ… Tracking Routes
 export const getLiveLocations = () =>
   api.get("/tracking/live-locations").then((res) => unwrap(res.data));
 export const syncTracking = () =>
@@ -83,7 +83,7 @@ export const syncTracking = () =>
 export const getBusLocations = () =>
   api.get("/tracking/bus-locations").then((res) => unwrap(res.data));
 
-// ✅ User Role Routes
+// âœ… User Role Routes
 export const getAssistants = () =>
   api.get("/users?role=ASSISTANT").then((res) => unwrap(res.data));
 export const getParents = () =>
@@ -110,7 +110,7 @@ export const updateBus = (id: number, data: any) =>
   api.put(`/buses/${id}`, data);
 export const deleteBus = (id: number) => api.delete(`/buses/${id}`);
 
-// ✅ Explicit `addBus` function for AddBusForm.tsx
+// âœ… Explicit `addBus` function for AddBusForm.tsx
 export const addBus = (busData: any) => api.post("/buses", busData).then(res => res.data);
 
 // ---------- Schools ----------
@@ -142,28 +142,28 @@ export const updateManifest = (id: number, data: any) =>
 export const deleteManifest = (id: number) => api.delete(`/manifests/${id}`);
 
 // ======================
-// Auth — first-login / password
+// Auth â€” first-login / password
 // ======================
-// POST /api/auth/first-login/verify-otp — completes first-time setup.
+// POST /api/auth/first-login/verify-otp â€” completes first-time setup.
 // Body: {otp, newPassword}. Requires the Bearer token from the initial
 // /auth/login response (interceptor above attaches it automatically).
 export const verifyFirstLoginOtp = (data: { otp: string; newPassword: string }) =>
   api.post("/auth/first-login/verify-otp", data).then((res) => res.data);
 
-// POST /api/auth/first-login/resend-otp — resend if the OTP expired/missed.
+// POST /api/auth/first-login/resend-otp â€” resend if the OTP expired/missed.
 export const resendFirstLoginOtp = () =>
   api.post("/auth/first-login/resend-otp").then((res) => res.data);
 
-// POST /api/auth/change-password — voluntary password change once logged in.
+// POST /api/auth/change-password â€” voluntary password change once logged in.
 export const changePassword = (data: { currentPassword: string; newPassword: string }) =>
   api.post("/auth/change-password", data).then((res) => res.data);
 
 // ======================
 // Push notifications
 // ======================
-// POST /api/push/register-token — body: {expoPushToken}.
+// POST /api/push/register-token â€” body: {expoPushToken}.
 // NOTE: this expects an Expo push token, which only exists inside an
-// Expo/React Native app shell — a plain browser has no such token. This
+// Expo/React Native app shell â€” a plain browser has no such token. This
 // helper is here so it's ready to call from a future Expo/Capacitor
 // wrapper of this app, but nothing in this web build calls it yet since
 // there's nothing valid to pass it. If this app is ever wrapped for
@@ -171,7 +171,7 @@ export const changePassword = (data: { currentPassword: string; newPassword: str
 export const registerPushToken = (expoPushToken: string) =>
   api.post("/push/register-token", { expoPushToken }).then((res) => res.data);
 
-// GET /api/notifications — parent's in-app notification feed (proximity
+// GET /api/notifications â€” parent's in-app notification feed (proximity
 // pickup/drop-off alerts, etc).
 export const getNotifications = () =>
   api.get("/notifications").then((res) => unwrap(res.data));
@@ -179,4 +179,14 @@ export const getNotifications = () =>
 // ======================
 // Export default API instance
 // ======================
+
+
+export const getUnreadNotificationCount = () =>
+  api.get("/notifications/unread-count").then((res) => res.data);
+
+export const markNotificationRead = (id: number | string) =>
+  api.patch(`/notifications/${id}/read`).then((res) => res.data);
+
 export default api;
+
+

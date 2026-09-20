@@ -19,6 +19,11 @@ import L from "leaflet";
  * visibly off after testing with the new computed bearing (adjust in 90deg
  * steps, same as before).
  *
+ * FIXED: a stray "+ 260" had been left in the rotation formula from the
+ * earlier manual-offset testing (see ROTATION_OFFSET_DEG history above).
+ * It rotated every icon 260deg off regardless of ROTATION_OFFSET_DEG's
+ * value — this affected every portal using this icon, not just one.
+ *
  * Color meaning (driven by the backend's `colorState` field):
  *   RED    - bus stopped
  *   YELLOW - bus moving, at least one child onboard
@@ -56,7 +61,11 @@ export function createBusIcon(vehicle: any, isSelected: boolean = false): L.DivI
   const filterColor = filters[colorState] || filters.GRAY;
 
   const rawDirection = vehicle.direction || 0;
-  const direction = (rawDirection + ROTATION_OFFSET_DEG + 260) % 360;
+  // NOTE: there was a stray "+ 260" here left over from earlier manual
+  // offset testing (see comment above) — it silently rotated every icon
+  // 260deg off regardless of ROTATION_OFFSET_DEG. Removed; +360 here is
+  // only to keep the result positive for JS's %, not an actual offset.
+  const direction = (rawDirection + ROTATION_OFFSET_DEG + 360) % 360;
   const size = isSelected ? 50 : 38;
   const pulse = colorState === "GREEN" && vehicle.nearPickup;
 

@@ -1,11 +1,11 @@
-import { Bell } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Bell, Bus, MapPin, AlertTriangle } from "lucide-react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { getNotifications } from "@/pages/api";
+import { getNotifications, getUnreadNotificationCount, markNotificationRead } from "@/pages/api";
 
 function fmt(d?: string) {
   if (!d) return "";
@@ -16,26 +16,119 @@ function fmt(d?: string) {
   }
 }
 
-// GET /api/notifications — parent's in-app feed (proximity pickup/drop-off
-// alerts, etc). Polled every 30s; that's frequent enough for "your child's
-// bus is nearby" without hammering the endpoint like live GPS polling does.
+// Backend sometimes embeds an internal reference tag like "[student:245]"
+// at the end of the message — confirmed from a real response. Strip it
+// for display; it's not meant for the parent to see.
+function cleanMessage(msg?: string) {
+  if (!msg) return "";
+  return msg.replace(/\s*\[\w+:\d+\]\s*$/i, "").trim();
+}
+
+type NotifKind = "ONBOARD" | "OFFBOARD" | "PROXIMITY" | "PANIC" | "OTHER";
+
+// Backend confirms notifications carry a `type` field with 4 possible
+// values (onboarding, offboarding, proximity alert, panic alert) — exact
+// enum string casing isn't confirmed, so this matches on substrings of
+// whatever `type` actually contains, and only falls back to scanning
+// title/message if `type` is missing entirely. OFFBOARD/CHECKED_OUT is
+// checked before ONBOARD/CHECKED_IN since "OFFBOARD" contains the
+// substring "BOARD" and would otherwise false-match first.
+function detectKind(n: any): NotifKind {
+  const typeField = (n.type ?? n.eventType ?? n.category ?? n.kind ?? "").toString().toUpperCase();
+  const haystack = typeField || [n.title, n.message, n.body].filter(Boolean).join(" ").toUpperCase();
+
+  if (haystack.includes("PANIC") || haystack.includes("SOS") || haystack.includes("EMERGENCY")) {
+    return "PANIC";
+  }
+  if (haystack.includes("PROXIM") || haystack.includes("NEARBY") || haystack.includes("APPROACHING")) {
+    return "PROXIMITY";
+  }
+  if (
+    haystack.includes("OFFBOARD") ||
+    haystack.includes("CHECKED_OUT") ||
+    haystack.includes("CHECKED OUT") ||
+    haystack.includes("DROPPED OFF") ||
+    haystack.includes("ALIGHT")
+  ) {
+    return "OFFBOARD";
+  }
+  if (
+    haystack.includes("ONBOARD") ||
+    haystack.includes("CHECKED_IN") ||
+    haystack.includes("CHECKED IN") ||
+    haystack.includes("BOARDED")
+  ) {
+    return "ONBOARD";
+  }
+  return "OTHER";
+}
+
+function KindIcon({ kind }: { kind: NotifKind }) {
+  switch (kind) {
+    case "PANIC":
+      return <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />;
+    case "PROXIMITY":
+      return <MapPin className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />;
+    case "OFFBOARD":
+      return <Bus className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />;
+    case "ONBOARD":
+      return <Bus className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />;
+    default:
+      return <Bell className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />;
+  }
+}
+
+// Generic — used by both ParentPortal (onboard/offboard/proximity/panic
+// for their own children) and the admin Navbar (same 4 types, scoped
+// tenant-wide by the backend based on the authenticated user's role).
 export function NotificationsBell() {
+  const queryClient = useQueryClient();
+
   const { data: notifications = [], isLoading } = useQuery({
     queryKey: ["notifications"],
-    queryFn: getNotifications,
+    queryFn: () => getNotifications(),
     refetchInterval: 30_000,
   });
 
+  // Dedicated lightweight endpoint for the badge — cheaper to poll more
+  // often than re-fetching the full list every time.
+  const { data: unreadCountData } = useQuery({
+    queryKey: ["notifications", "unread-count"],
+    queryFn: getUnreadNotificationCount,
+    refetchInterval: 15_000,
+  });
+
   const list = Array.isArray(notifications) ? notifications : [];
-  const unreadCount = list.filter((n: any) => !n.read && !n.readAt).length;
+  // Confirmed from a real response: GET /notifications/unread-count
+  // returns { success, unreadCount }. Keeping the other fallbacks in case
+  // this ever changes, but unreadCount is the real, confirmed key now.
+  const unreadCount =
+    unreadCountData?.unreadCount ??
+    unreadCountData?.count ??
+    unreadCountData?.data?.unreadCount ??
+    list.filter((n: any) => !n.read && !n.readAt).length;
+
+  const markReadMutation = useMutation({
+    mutationFn: (id: number | string) => markNotificationRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+
+  const handleItemClick = (n: any) => {
+    if (n.id != null && !n.read && !n.readAt) {
+      markReadMutation.mutate(n.id);
+    }
+  };
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button className="relative p-2 rounded-full hover:bg-muted transition-colors">
-          <Bell className="h-5 w-5" />
+        <button className="relative flex items-center gap-1.5 px-3 py-1 border rounded-lg text-sm hover:bg-muted transition-colors">
+          <Bell className="h-4 w-4" />
+          Notifications
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4 text-center">
+            <span className="absolute -top-1.5 -right-1.5 h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4 text-center">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -51,20 +144,31 @@ export function NotificationsBell() {
               No notifications yet.
             </p>
           ) : (
-            list.map((n: any, i: number) => (
-              <div
-                key={n.id ?? i}
-                className={`p-3 border-b last:border-b-0 text-sm ${
-                  !n.read && !n.readAt ? "bg-primary/5" : ""
-                }`}
-              >
-                <p className="font-medium">{n.title ?? "Notification"}</p>
-                <p className="text-muted-foreground">{n.message ?? n.body ?? ""}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {fmt(n.createdAt ?? n.timestamp)}
-                </p>
-              </div>
-            ))
+            list.map((n: any, i: number) => {
+              const kind = detectKind(n);
+              const unread = !n.read && !n.readAt;
+              return (
+                <button
+                  key={n.id ?? i}
+                  onClick={() => handleItemClick(n)}
+                  className={`w-full text-left p-3 border-b last:border-b-0 text-sm flex gap-2 hover:bg-muted/50 transition-colors ${
+                    unread ? "bg-primary/5" : ""
+                  }`}
+                >
+                  <KindIcon kind={kind} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{n.title ?? "Notification"}</p>
+                      {unread && <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />}
+                    </div>
+                    <p className="text-muted-foreground">{cleanMessage(n.message ?? n.body)}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {fmt(n.sentAt ?? n.createdAt ?? n.timestamp)}
+                    </p>
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       </PopoverContent>

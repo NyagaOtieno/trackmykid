@@ -27,6 +27,8 @@ const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
 const STUDENTS_API = `${API_BASE}/students`;
 const BUSES_API = `${API_BASE}/buses`;
 const MANIFEST_API = `${API_BASE}/manifests`;
+const BULK_ONBOARD_API = `${MANIFEST_API}/bulk-onboard`;
+const BULK_OFFBOARD_API = `${MANIFEST_API}/bulk-offboard`;
 const BUS_LOCATIONS_API = `${API_BASE}/tracking/bus-locations`;
 const PANIC_API = `${API_BASE}/panic`;
 
@@ -210,12 +212,78 @@ export default function AssistantPortal() {
       toast.success(`${label} successfully!`);
       queryClient.invalidateQueries(["manifests"]);
       refetchManifests();
-      // Note: SMS notification to the parent is already sent server-side
-      // by the /api/manifests endpoint above (see notifyRecipient in
-      // manifestController.js). No separate client-side call is needed.
     },
     onError: (err: any) => toast.error(`Failed to update manifest: ${err?.response?.data?.message || err.message}`),
   });
+
+  // Bulk onboard mutation. Onboard All fires immediately on click, no
+  // confirmation — the risk with onboarding is low (worst case, you
+  // offboard the one extra kid manually); offboard is the one that
+  // needs a confirmation, since it fires an SMS to every parent and
+  // can't be undone (see handleBulkOffboard below).
+  const bulkOnboardMutation = useMutation({
+    mutationFn: async ({ session }: { session: "MORNING" | "EVENING" }) => {
+      const res = await axios.post(
+        BULK_ONBOARD_API,
+        { busId: bus?.id, assistantId, session, excludeStudentIds: [] },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      return res.data;
+    },
+    onSuccess: (data: any) => {
+      toast.success(data?.message || "Bulk onboard complete");
+      queryClient.invalidateQueries(["manifests"]);
+      refetchManifests();
+    },
+    onError: (err: any) =>
+      toast.error(`Bulk onboard failed: ${err?.response?.data?.message || err.message}`),
+  });
+
+  // Bulk offboard mutation — the caller (handleBulkOffboard below) shows a
+  // confirmation dialog before this ever runs, since it can't be undone.
+  const bulkOffboardMutation = useMutation({
+    mutationFn: async ({ session }: { session: "MORNING" | "EVENING" }) => {
+      const res = await axios.post(
+        BULK_OFFBOARD_API,
+        { busId: bus?.id, assistantId, session },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      return res.data;
+    },
+    onSuccess: (data: any) => {
+      toast.success(data?.message || "Bulk offboard complete");
+      queryClient.invalidateQueries(["manifests"]);
+      refetchManifests();
+    },
+    onError: (err: any) =>
+      toast.error(`Bulk offboard failed: ${err?.response?.data?.message || err.message}`),
+  });
+
+  // Onboard All: only ever used at the EVENING session (kids all board
+  // together at the school gate for the evening run) — no confirmation,
+  // fires straight away.
+  const handleBulkOnboard = (session: "EVENING") => {
+    if (!isWithinSession(session)) {
+      toast.error("Evening onboarding is only allowed during the evening session (Kenya time).");
+      return;
+    }
+    bulkOnboardMutation.mutate({ session });
+  };
+
+  // Offboard All: only ever used at the MORNING session (kids all arrive
+  // together at school for morning drop-off) — confirmed, since it fires
+  // an SMS to every parent and can't be undone.
+  const handleBulkOffboard = (session: "MORNING") => {
+    if (!isWithinSession(session)) {
+      toast.error("Morning offboarding is only allowed during the morning session (Kenya time).");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Offboard ALL onboarded students for the morning session on ${bus?.plateNumber || "this bus"}? This will send an SMS to every parent and cannot be undone.`
+    );
+    if (!confirmed) return;
+    bulkOffboardMutation.mutate({ session });
+  };
 
   const panicMutation = useMutation({
     mutationFn: async ({ reason }: { reason: string }) => {
@@ -404,6 +472,43 @@ export default function AssistantPortal() {
                   {routePositions.length > 1 && <Polyline positions={routePositions} />}
                 </MapContainer>
               ) : <p className="text-sm text-muted-foreground mt-2">Bus location not available</p>}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Bulk Actions — Onboard All is evening-only (everyone boards
+            together at the school gate for the evening run); Offboard
+            All is morning-only (everyone arrives together at school for
+            morning drop-off). Individual per-student In/Out buttons
+            below still work in both sessions for anyone who needs
+            manual correction. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Bulk Actions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 bg-muted rounded-lg">
+              <span className="font-medium">Morning Session — Offboard All</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => handleBulkOffboard("MORNING")}
+                disabled={!isWithinSession("MORNING") || bulkOffboardMutation.isPending}
+              >
+                Offboard All (M)
+              </Button>
+            </div>
+
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 bg-muted rounded-lg">
+              <span className="font-medium">Evening Session — Onboard All</span>
+              <Button
+                size="sm"
+                className="bg-green-600 text-white"
+                onClick={() => handleBulkOnboard("EVENING")}
+                disabled={!isWithinSession("EVENING") || bulkOnboardMutation.isPending}
+              >
+                Onboard All (E)
+              </Button>
             </div>
           </CardContent>
         </Card>
