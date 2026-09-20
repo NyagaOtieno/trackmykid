@@ -31,54 +31,7 @@ export default function Settings() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Data Source</CardTitle>
-            <CardDescription>
-              Switch between mock data and live API
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="mock-data">Use Mock Data</Label>
-                <p className="text-sm text-muted-foreground">
-                  Enable to use local mock data instead of live API
-                </p>
-              </div>
-              <Switch
-                id="mock-data"
-                checked={useMockData}
-                onCheckedChange={setUseMockData}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>API Configuration</CardTitle>
-            <CardDescription>
-              Set your backend API endpoint
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="api-url">API Base URL</Label>
-              <Input
-                id="api-url"
-                type="url"
-                value={apiBaseUrl}
-                onChange={(e) => setApiBaseUrl(e.target.value)}
-                placeholder="https://api.example.com"
-              />
-              <p className="text-xs text-muted-foreground">
-                This will be used when Mock Data is disabled
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
+       
         <Card>
           <CardHeader>
             <CardTitle>Application Info</CardTitle>
