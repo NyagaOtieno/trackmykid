@@ -31,7 +31,8 @@ export default function Settings() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-       
+        
+
         <Card>
           <CardHeader>
             <CardTitle>Application Info</CardTitle>
@@ -47,7 +48,7 @@ export default function Settings() {
             <div className="flex justify-between py-2 border-b">
               <span className="text-sm font-medium">Current Mode</span>
               <span className={`text-sm font-medium ${useMockData ? 'text-warning' : 'text-success'}`}>
-                {useMockData ? 'Mock Data' : 'Live API'}
+                {useMockData ? 'Live API' : 'Mock Data'}
               </span>
             </div>
             <div className="flex justify-between py-2">
