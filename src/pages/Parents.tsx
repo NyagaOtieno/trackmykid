@@ -40,6 +40,8 @@ interface Student {
   };
 }
 
+const ITEMS_PER_PAGE = 15;
+
 export default function ParentsUI() {
   const [parents, setParents] = useState<Parent[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -48,32 +50,80 @@ export default function ParentsUI() {
   const [addingParent, setAddingParent] = useState<boolean>(false);
   const [editingParent, setEditingParent] = useState<Parent | null>(null);
   const [addingChildFor, setAddingChildFor] = useState<Parent | null>(null);
+
+  // Search box value (typed) vs. the term actually sent to the server,
+  // debounced so we're not firing a request per keystroke.
+  const [searchInput, setSearchInput] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
+
   const [currentPage, setCurrentPage] = useState<number>(1);
+  // From the server's response — GET /api/parents returns
+  // { page, limit, count, data }. This is the real total across every
+  // page, not just however many happened to be fetched — previously the
+  // component computed "total pages" from the already-paginated array it
+  // had in memory, which was wrong (and always maxed at one server page).
+  const [totalCount, setTotalCount] = useState<number>(0);
 
-  const itemsPerPage = 15;
+  // Debounce the search box -> searchTerm, and reset to page 1 on a new
+  // search (searching page 3 of an old query makes no sense for a new one).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchTerm(searchInput.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
-  const fetchData = async () => {
+  const authHeaders = () => {
+    const token = localStorage.getItem("token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  // GET /api/parents?page=&limit=&q= — server-side paginated AND
+  // server-side searched (q matches name/email/phone tenant-wide, not
+  // just within whatever page happened to be in memory).
+  const fetchParents = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
-      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-      const [parentsRes, studentsRes] = await Promise.all([
-        axios.get<{ data: Parent[] }>("https://tmk-api.joshpitah.co.ke/api/parents", { headers: authHeaders }),
-        axios.get<{ data: Student[] }>("https://tmk-api.joshpitah.co.ke/api/students", { headers: authHeaders }),
-      ]);
-
-      setParents(parentsRes.data.data || []);
-      setStudents(studentsRes.data.data || []);
+      const res = await axios.get<{ data: Parent[]; count: number; page: number; limit: number }>(
+        "https://tmk-api.joshpitah.co.ke/api/parents",
+        {
+          headers: authHeaders(),
+          params: { page: currentPage, limit: ITEMS_PER_PAGE, ...(searchTerm ? { q: searchTerm } : {}) },
+        }
+      );
+      setParents(res.data.data || []);
+      setTotalCount(res.data.count ?? 0);
     } catch (err) {
-      console.error("Error fetching data:", err);
+      console.error("Error fetching parents:", err);
+      toast.error("Failed to load parents");
     } finally {
       setLoading(false);
     }
   };
 
+  // Students aren't paginated by this UI (only used to build the
+  // "Linked Students" column) — fetched once, separately from the
+  // paginated/searched parents list.
+  const fetchStudents = async () => {
+    try {
+      const res = await axios.get<{ data: Student[] }>(
+        "https://tmk-api.joshpitah.co.ke/api/students",
+        { headers: authHeaders() }
+      );
+      setStudents(res.data.data || []);
+    } catch (err) {
+      console.error("Error fetching students:", err);
+    }
+  };
+
   useEffect(() => {
-    fetchData();
+    fetchParents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, searchTerm]);
+
+  useEffect(() => {
+    fetchStudents();
     getBuses()
       .then(setBuses)
       .catch((err) => console.error("Failed to load buses", err));
@@ -85,11 +135,11 @@ export default function ParentsUI() {
     if (!confirm(`Delete ${parent.user?.name || "this parent"}?`)) return;
 
     try {
-      const token = localStorage.getItem("token");
-      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
-      await axios.delete(`https://tmk-api.joshpitah.co.ke/api/parents/${parent.id}`, { headers: authHeaders });
+      await axios.delete(`https://tmk-api.joshpitah.co.ke/api/parents/${parent.id}`, {
+        headers: authHeaders(),
+      });
       toast.success("Parent deleted successfully");
-      fetchData();
+      fetchParents();
     } catch (err: any) {
       console.error(err);
       toast.error(err?.response?.data?.message || "Failed to delete parent");
@@ -101,26 +151,15 @@ export default function ParentsUI() {
     try {
       await deleteStudent(student.id);
       toast.success("Child removed");
-      fetchData();
+      fetchStudents();
     } catch (err: any) {
       console.error(err);
       toast.error(err?.response?.data?.message || "Failed to remove child");
     }
   };
 
-  const filteredParents = parents.filter((p) => {
-    const term = searchTerm.toLowerCase();
-    const user = p.user ?? {};
-    return (
-      user.name?.toLowerCase().includes(term) ||
-      user.email?.toLowerCase().includes(term) ||
-      user.phone?.toLowerCase().includes(term)
-    );
-  });
-
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedParents = filteredParents.slice(startIndex, startIndex + itemsPerPage);
-  const totalPages = Math.ceil(filteredParents.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
 
   const studentsByParent: Record<number, Student[]> = {};
   students.forEach((s) => {
@@ -150,9 +189,9 @@ export default function ParentsUI() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search parents..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by parent, child, bus, phone or email..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-10"
           />
         </div>
@@ -178,14 +217,14 @@ export default function ParentsUI() {
                   Loading parents...
                 </TableCell>
               </TableRow>
-            ) : paginatedParents.length === 0 ? (
+            ) : parents.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center py-8">
                   No parents found
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedParents.map((parent, idx) => {
+              parents.map((parent, idx) => {
                 const user = parent.user ?? {};
                 const linkedStudents = studentsByParent[parent.id] ?? [];
                 return (
@@ -250,11 +289,12 @@ export default function ParentsUI() {
         </Table>
       </div>
 
-      {/* Pagination */}
+      {/* Pagination — now driven by the server's real count, not the size
+          of whatever page happened to already be in memory. */}
       <div className="flex justify-between items-center mt-4">
         <p className="text-sm text-muted-foreground">
-          Showing {startIndex + 1}–{Math.min(startIndex + itemsPerPage, filteredParents.length)} of{" "}
-          {filteredParents.length} parents
+          Showing {totalCount === 0 ? 0 : startIndex + 1}–
+          {Math.min(startIndex + ITEMS_PER_PAGE, totalCount)} of {totalCount} parents
         </p>
         <div className="flex items-center gap-2">
           <Button
@@ -287,7 +327,11 @@ export default function ParentsUI() {
             <AddParentForm
               onAdded={() => {
                 setAddingParent(false);
-                fetchData();
+                // New parents sort first (backend orders id desc) — jump
+                // back to page 1 so the just-created parent is visible
+                // immediately regardless of which page was open.
+                setCurrentPage(1);
+                fetchParents();
               }}
               onCancel={() => setAddingParent(false)}
             />
@@ -304,7 +348,7 @@ export default function ParentsUI() {
               parent={editingParent}
               onUpdated={() => {
                 setEditingParent(null);
-                fetchData();
+                fetchParents();
               }}
               onCancel={() => setEditingParent(null)}
             />
@@ -324,7 +368,7 @@ export default function ParentsUI() {
               buses={buses}
               onAdded={() => {
                 setAddingChildFor(null);
-                fetchData();
+                fetchStudents();
               }}
               onCancel={() => setAddingChildFor(null)}
             />
