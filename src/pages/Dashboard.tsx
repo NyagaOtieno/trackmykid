@@ -289,81 +289,18 @@ export default function Dashboard() {
 
           <Card className="shadow-md hover:shadow-lg transition-all">
             <CardHeader className="flex justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Today's Trips</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Today's Manifests</CardTitle>
               <ClipboardList className="w-5 h-5 text-orange-600" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">{todaysManifests.length}</div>
-              <p className="text-xs text-muted-foreground">Trip manifests recorded today</p>
+              <p className="text-xs text-muted-foreground">Trips Manifests recorded today</p>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Recent Students */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Recent Students</h2>
-        <input
-          type="text"
-          placeholder="Search students..."
-          value={studentSearch}
-          onChange={(e) => setStudentSearch(e.target.value)}
-          className="mb-2 p-2 border rounded w-full"
-        />
-        {paginatedStudents.length > 0 ? (
-          <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-gray-600 border-b">
-                <tr>
-                  <th className="py-2 px-3">#</th>
-                  <th className="py-2 px-3">Name</th>
-                  <th className="py-2 px-3">Grade</th>
-                  <th className="py-2 px-3">School</th>
-                  <th className="py-2 px-3">Bus</th>
-                  <th className="py-2 px-3">Parent</th>
-                  <th className="py-2 px-3">Home Location</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedStudents.map((s, idx) => (
-                  <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50 transition">
-                    <td className="py-2 px-3">{(studentPage - 1) * rowsPerPage + idx + 1}</td>
-                    <td className="py-2 px-3">{s.name}</td>
-                    <td className="py-2 px-3">{s.grade}</td>
-                    <td className="py-2 px-3">{s.school?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{s.bus?.name || "N/A"}</td>
-                    <td className="py-2 px-3">{s.parent?.user?.name || "N/A"}</td>
-                    <td className="py-2 px-3">
-                      {studentLocations[s.id] ? studentLocations[s.id] : (
-                        <div className="flex items-center gap-2 text-gray-400">
-                          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Pagination */}
-            <div className="mt-2 flex justify-end space-x-2">
-              {Array.from({ length: Math.ceil(filteredStudents.length / rowsPerPage) }, (_, i) => (
-                <button
-                  key={i}
-                  className={`px-3 py-1 rounded ${i + 1 === studentPage ? "bg-blue-600 text-white" : "bg-gray-200"}`}
-                  onClick={() => setStudentPage(i + 1)}
-                >
-                  {i + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">No student data available.</p>
-        )}
-      </div>
-
-      {/* Today's Trip Activity */}
+     {/* Today's Trip Activity */}
       <div className="mt-8">
         <h2 className="text-lg font-semibold text-gray-700 mb-2">Today's Trip Activity</h2>
         <input
@@ -453,6 +390,70 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* Recent Students */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold text-gray-700 mb-2">Recent Students</h2>
+        <input
+          type="text"
+          placeholder="Search students..."
+          value={studentSearch}
+          onChange={(e) => setStudentSearch(e.target.value)}
+          className="mb-2 p-2 border rounded w-full"
+        />
+        {paginatedStudents.length > 0 ? (
+          <div className="bg-white rounded-lg shadow p-4 overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-gray-600 border-b">
+                <tr>
+                  <th className="py-2 px-3">#</th>
+                  <th className="py-2 px-3">Name</th>
+                  <th className="py-2 px-3">Grade</th>
+                  <th className="py-2 px-3">School</th>
+                  <th className="py-2 px-3">Bus</th>
+                  <th className="py-2 px-3">Parent</th>
+                  <th className="py-2 px-3">Home Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedStudents.map((s, idx) => (
+                  <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50 transition">
+                    <td className="py-2 px-3">{(studentPage - 1) * rowsPerPage + idx + 1}</td>
+                    <td className="py-2 px-3">{s.name}</td>
+                    <td className="py-2 px-3">{s.grade}</td>
+                    <td className="py-2 px-3">{s.school?.name || "N/A"}</td>
+                    <td className="py-2 px-3">{s.bus?.name || "N/A"}</td>
+                    <td className="py-2 px-3">{s.parent?.user?.name || "N/A"}</td>
+                    <td className="py-2 px-3">
+                      {studentLocations[s.id] ? studentLocations[s.id] : (
+                        <div className="flex items-center gap-2 text-gray-400">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination */}
+            <div className="mt-2 flex justify-end space-x-2">
+              {Array.from({ length: Math.ceil(filteredStudents.length / rowsPerPage) }, (_, i) => (
+                <button
+                  key={i}
+                  className={`px-3 py-1 rounded ${i + 1 === studentPage ? "bg-blue-600 text-white" : "bg-gray-200"}`}
+                  onClick={() => setStudentPage(i + 1)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No student data available.</p>
+        )}
+      </div>
+
+      
       {/* Map View */}
       <div className="mt-8">
         <h2 className="text-lg font-semibold text-gray-700 mb-2">Live Fleet Map</h2>
