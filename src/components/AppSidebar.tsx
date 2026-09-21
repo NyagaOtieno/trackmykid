@@ -1,5 +1,5 @@
 import { Home, Map, Users, Bus, ClipboardList, UserCog, UsersRound, Settings, Truck } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Sidebar,
   SidebarContent,
@@ -25,21 +25,12 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { open } = useSidebar();
-  const location = useLocation();
-
-  // Helper function to check if a route is active
-  const isActiveRoute = (url: string) => {
-    if (url === '/dashboard') {
-      return location.pathname === '/dashboard';
-    }
-    // For other routes, check if the pathname starts with the URL
-    // This handles sub-routes like /buses/add highlighting /buses
-    return location.pathname.startsWith(url);
-  };
+  const { open: desktopOpen, isMobile, setOpenMobile } = useSidebar();
+  // In the mobile drawer the sidebar is always full-width, so always show labels
+  const open = isMobile ? true : desktopOpen;
 
   return (
-    <Sidebar className={open ? 'w-60' : 'w-14'}>
+    <Sidebar>
       <SidebarContent>
         <div className="p-4 border-b border-sidebar-border">
           {open ? (
@@ -56,26 +47,27 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => {
-                const isActive = isActiveRoute(item.url);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton 
-                      asChild 
-                      isActive={isActive}
-                      className={isActive ? "bg-sidebar-primary/20 text-sidebar-primary-foreground border-l-2 border-sidebar-primary" : ""}
+              {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      onClick={() => {
+                        // Close the mobile drawer after picking a page
+                        if (isMobile) setOpenMobile(false);
+                      }}
+                      className={({ isActive }) =>
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-primary font-medium'
+                          : 'hover:bg-sidebar-accent/50'
+                      }
                     >
-                      <NavLink
-                        to={item.url}
-                        className="flex items-center gap-2"
-                      >
-                        <item.icon className="h-4 w-4" />
-                        {open && <span>{item.title}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+                      <item.icon className="h-4 w-4" />
+                      {open && <span>{item.title}</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

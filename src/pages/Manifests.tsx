@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getManifests } from '@/lib/api';
 import * as XLSX from 'xlsx';
 import {
   Table,
@@ -12,6 +11,31 @@ import {
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+// ---------------- API ----------------
+// Self-contained fetch (same pattern as ParentPortal.tsx: Bearer token from
+// localStorage "token", set by Login.tsx) rather than going through
+// getManifests() from @/lib/api — that function's exact return shape
+// (raw {success,data} vs already-unwrapped array) wasn't confirmed, and a
+// shape mismatch there (component expecting {data:[...]} from something
+// that already returns [...] directly) is the most likely explanation for
+// "manifest not showing anything": Array.isArray(data?.data) would be
+// false either way you get it wrong, silently rendering an empty table
+// with no visible error. Fetching directly here removes that uncertainty.
+const API_BASE = "https://tmk-api.joshpitah.co.ke/api";
+const MANIFESTS_ENDPOINT = `${API_BASE}/manifests`;
+
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 // Helper to reverse geocode lat/lon into readable location
 const getLocationName = async (lat: number, lon: number): Promise<string> => {
@@ -27,14 +51,39 @@ const getLocationName = async (lat: number, lon: number): Promise<string> => {
   }
 };
 
+function toDateInputValue(d: Date) {
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
 export default function Manifests() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['manifests'],
-    queryFn: getManifests,
+  // Date range + session filter — backend (GET /api/manifests) supports
+  // ?from=&to=&session=&busId=&status=, capped at 31 days apart ("up to
+  // the past month"). Default to the last 31 days, matching the backend's
+  // own default when no range is given at all.
+  const today = useMemo(() => new Date(), []);
+  const oneMonthAgo = useMemo(() => new Date(Date.now() - 31 * 24 * 60 * 60 * 1000), []);
+
+  const [fromDate, setFromDate] = useState(toDateInputValue(oneMonthAgo));
+  const [toDate, setToDate] = useState(toDateInputValue(today));
+  const [sessionFilter, setSessionFilter] = useState<string>("ALL");
+
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['manifests', fromDate, toDate, sessionFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ from: fromDate, to: toDate });
+      if (sessionFilter !== "ALL") params.set("session", sessionFilter);
+
+      const res = await fetch(`${MANIFESTS_ENDPOINT}?${params.toString()}`, {
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error(`Failed to fetch manifests (${res.status})`);
+      const json = await res.json();
+      // Tolerant of either {success,data:[...]} or a bare [...] response.
+      return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+    },
   });
 
-  // ✅ Ensure manifests is always an array
-  const manifests = Array.isArray(data?.data) ? data.data : [];
+  const manifests = Array.isArray(data) ? data : [];
 
   const [search, setSearch] = useState('');
   const [locations, setLocations] = useState<{ [key: number]: string }>({});
@@ -84,7 +133,27 @@ export default function Manifests() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search]);
+  }, [search, fromDate, toDate, sessionFilter]);
+
+  // Keep the date range within the backend's 31-day cap — clamp `from`
+  // forward if the gap ever exceeds that, rather than letting a request
+  // silently get clamped server-side with no visible explanation here.
+  const handleFromChange = (value: string) => {
+    setFromDate(value);
+    const from = new Date(value);
+    const to = new Date(toDate);
+    if (to.getTime() - from.getTime() > 31 * 24 * 60 * 60 * 1000) {
+      setToDate(toDateInputValue(new Date(from.getTime() + 31 * 24 * 60 * 60 * 1000)));
+    }
+  };
+  const handleToChange = (value: string) => {
+    setToDate(value);
+    const to = new Date(value);
+    const from = new Date(fromDate);
+    if (to.getTime() - from.getTime() > 31 * 24 * 60 * 60 * 1000) {
+      setFromDate(toDateInputValue(new Date(to.getTime() - 31 * 24 * 60 * 60 * 1000)));
+    }
+  };
 
   // Download manifests by bus as Excel
   const downloadByBus = () => {
@@ -108,7 +177,7 @@ export default function Manifests() {
         Student: m.student?.name || 'N/A',
         Assistant: m.assistant?.name || 'N/A',
         Bus: m.bus?.plateNumber || m.busId || 'N/A',
-        Session: m.session || 'N/A', // ✅ Added session
+        Session: m.session || 'N/A',
         Status: m.status,
         Timestamp: m.date
           ? new Date(m.date).toLocaleString()
@@ -136,7 +205,7 @@ export default function Manifests() {
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Input
             placeholder="Search by student, bus, or assistant..."
             value={search}
@@ -145,6 +214,51 @@ export default function Manifests() {
           />
           <Button onClick={downloadByBus}>Download Excel</Button>
         </div>
+      </div>
+
+      {/* Date range + session filter — "choose manifest from up to past
+          one month" */}
+      <div className="flex flex-wrap items-end gap-3 bg-card border rounded-lg p-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">From</label>
+          <Input
+            type="date"
+            value={fromDate}
+            max={toDate}
+            onChange={(e) => handleFromChange(e.target.value)}
+            className="w-40"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">To</label>
+          <Input
+            type="date"
+            value={toDate}
+            min={fromDate}
+            max={toDateInputValue(today)}
+            onChange={(e) => handleToChange(e.target.value)}
+            className="w-40"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Session</label>
+          <Select value={sessionFilter} onValueChange={setSessionFilter}>
+            <SelectTrigger className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All sessions</SelectItem>
+              <SelectItem value="MORNING">Morning</SelectItem>
+              <SelectItem value="EVENING">Evening</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>
+          Refresh
+        </Button>
+        <span className="text-xs text-muted-foreground ml-auto">
+          Range capped at 31 days.
+        </span>
       </div>
 
       {/* Table */}
@@ -156,7 +270,7 @@ export default function Manifests() {
               <TableHead>Student Name</TableHead>
               <TableHead>Bus Plate</TableHead>
               <TableHead>Assistant Name</TableHead>
-              <TableHead>Session</TableHead> {/* ✅ Added session */}
+              <TableHead>Session</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Timestamp</TableHead>
               <TableHead>Location</TableHead>
@@ -169,10 +283,16 @@ export default function Manifests() {
                   Loading manifests...
                 </TableCell>
               </TableRow>
+            ) : isError ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center py-8 text-red-600">
+                  Failed to load manifests. Try Refresh, or check that you're still logged in.
+                </TableCell>
+              </TableRow>
             ) : currentManifests.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8">
-                  No manifests found
+                  No manifests found for this date range.
                 </TableCell>
               </TableRow>
             ) : (
@@ -188,7 +308,7 @@ export default function Manifests() {
                     <TableCell>{m.student?.name || 'N/A'}</TableCell>
                     <TableCell>{m.bus?.plateNumber || m.busId || 'N/A'}</TableCell>
                     <TableCell>{m.assistant?.name || 'N/A'}</TableCell>
-                    <TableCell>{m.session || 'N/A'}</TableCell> {/* ✅ Added session */}
+                    <TableCell>{m.session || 'N/A'}</TableCell>
                     <TableCell>
                       <span
                         className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -234,7 +354,7 @@ export default function Manifests() {
       {/* Pagination Controls */}
       <div className="flex justify-between items-center mt-4">
         <span className="text-sm text-gray-600">
-          Showing {indexOfFirstItem + 1}–
+          Showing {filteredManifests.length === 0 ? 0 : indexOfFirstItem + 1}–
           {Math.min(indexOfLastItem, filteredManifests.length)} of {filteredManifests.length} entries
         </span>
 
@@ -248,13 +368,13 @@ export default function Manifests() {
             Previous
           </Button>
           <span className="text-sm font-medium">
-            Page {currentPage} of {totalPages}
+            Page {currentPage} of {Math.max(totalPages, 1)}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            disabled={currentPage === totalPages}
+            disabled={currentPage === totalPages || totalPages === 0}
           >
             Next
           </Button>
