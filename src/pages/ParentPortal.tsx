@@ -54,7 +54,7 @@ function FocusOnSelected({ target }: { target: { lat: number; lon: number } | nu
    comment block in Tracking.tsx. Rather than trust it directly, we compute
    bearing ourselves from consecutive real GPS fixes per bus, holding the
    last known bearing when movement is below a jitter-range threshold. */
-const MIN_MOVE_METERS = 8;
+const MIN_MOVE_METERS = 3;
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371000;
@@ -75,7 +75,7 @@ function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) 
   const x =
     Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
     Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  return (toDeg(Math.atan2(y, x)) + 260) % 360;
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
@@ -202,7 +202,7 @@ export default function ParentPortal() {
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
-    refetchInterval: 30000,
+    refetchInterval: 3000,
   });
   const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 

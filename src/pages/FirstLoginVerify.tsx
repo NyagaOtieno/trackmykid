@@ -61,6 +61,7 @@ export default function FirstLoginVerify() {
       if (result?.user) localStorage.setItem("user", JSON.stringify(result.user));
 
       localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("loginTime", String(Date.now()));
       toast.success("Password set — welcome!");
 
       switch (user?.role) {

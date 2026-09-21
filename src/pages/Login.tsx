@@ -10,58 +10,44 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import api from "./api";
+import api from "./api"; // ✅ consolidated onto the hardened client (timeout + 401/403 auto-logout) — was using a separate, weaker duplicate axios instance in @/api/axiosConfig
 import { Eye, EyeOff } from "lucide-react";
 
-// Backend endpoints (baseURL already handled by api)
+// ✅ Backend endpoints (baseURL already handled by api)
 const AUTH_URL = "/auth/login";
 const FORGOT_URL = "/auth/forgot-password";
 
 export default function Login() {
   const navigate = useNavigate();
 
-  // Login identifier can be either email or phone
-  const [identifier, setIdentifier] = useState("");
+  const [identifier, setIdentifier] = useState(""); // email OR phone
   const [password, setPassword] = useState("");
-
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
-  // Forgot password remains email-based
   const [forgotEmail, setForgotEmail] = useState("");
   const [isForgotOpen, setIsForgotOpen] = useState(false);
 
-  // Check whether the login value is an email
-  const isEmail = (value: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-  };
-
-  // Redirect if already authenticated
+  // ✅ Redirect if already authenticated
   useEffect(() => {
     const token = localStorage.getItem("token");
     const user = JSON.parse(localStorage.getItem("user") || "{}");
-    const isAuthenticated =
-      localStorage.getItem("isAuthenticated") === "true";
+    const isAuthenticated = localStorage.getItem("isAuthenticated") === "true";
 
     if (token && isAuthenticated) {
-      // Redirect based on role
+      // Only redirect based on role
       switch (user.role) {
         case "ADMIN":
           navigate("/dashboard");
           break;
-
         case "PARENT":
           navigate("/parent-portal");
           break;
-
         case "DRIVER":
           navigate("/driver-portal");
           break;
-
         case "ASSISTANT":
           navigate("/assistant-portal");
           break;
-
         default:
           localStorage.clear();
           navigate("/");
@@ -71,65 +57,50 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    const loginValue = identifier.trim();
-
-    if (!loginValue) {
-      toast.error("Please enter your email or phone number.");
-      return;
-    }
-
-    if (!password) {
-      toast.error("Please enter your password.");
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      // Send exactly what the user entered.
-      // Backend supports both email and phone.
-      const loginData = isEmail(loginValue)
-        ? {
-            email: loginValue,
-            password,
-          }
-        : {
-            phone: loginValue,
-            password,
-          };
+      // Send whichever field matches what the person typed. The local
+      // copy of authRoutes.js only reads `email`, but production has
+      // diverged (it already returns mustChangePassword/isFirstLogin,
+      // which this local copy doesn't either) — sending the value under
+      // the correct-looking key covers a backend that branches on
+      // req.body.email vs req.body.phone. Looks like an email (has an
+      // @ and a dot) → send as email; otherwise treat as a phone number.
+      const trimmed = identifier.trim();
+      const looksLikeEmail = /^\S+@\S+\.\S+$/.test(trimmed);
+      const payload = looksLikeEmail
+        ? { email: trimmed, password }
+        : { phone: trimmed, password };
 
-      // Login via api instance
-      const response = await api.post(AUTH_URL, loginData);
-
-      const {
-        token,
-        user,
-        mustChangePassword,
-        isFirstLogin,
-        otpSent,
-      } = response.data || {};
+      // 🚀 Login via api instance
+      const response = await api.post(AUTH_URL, payload);
+      const { token, user, mustChangePassword, isFirstLogin, otpSent } = response.data || {};
 
       if (!token) {
         throw new Error("Invalid login response from server");
       }
 
-      // First-time login:
-      // Backend wants OTP verification and/or a new password
-      // before the session is fully authenticated.
-      if (mustChangePassword || isFirstLogin) {
+      // ✅ First-time login: backend wants OTP verification + a new
+      // password before this session is fully authenticated. Save the
+      // token (needed as Bearer for the verify-otp call) and the partial
+      // user info, but deliberately do NOT set isAuthenticated yet —
+      // ProtectedRoute gates on that flag, so this keeps the user
+      // confined to /first-login until they actually complete it.
+      // First-time forced password change: the backend only ever sends
+      // an OTP when mustChangePassword is true (isFirstLogin alone,
+      // without mustChangePassword, sends no OTP — so it's not a valid
+      // gate on its own, or /first-login/verify-otp would 400 with
+      // "No pending OTP").
+      if (mustChangePassword) {
         localStorage.setItem("token", token);
-
-        if (user) {
-          localStorage.setItem("user", JSON.stringify(user));
-        }
+        if (user) localStorage.setItem("user", JSON.stringify(user));
 
         toast.info(
           otpSent
             ? "First-time login — enter the OTP we just sent you to set a new password."
             : "First-time login — you need to set a new password to continue."
         );
-
         navigate("/first-login");
         return;
       }
@@ -138,52 +109,43 @@ export default function Login() {
         throw new Error("Invalid login response from server");
       }
 
-      // Save session
+      // ✅ Save session
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("loginTime", String(Date.now()));
 
       toast.success(`Welcome back, ${user.name || "User"}!`);
 
-      // Redirect based on role
+      // ✅ Redirect based on role
       switch (user.role) {
         case "PARENT":
           navigate("/parent-portal");
           break;
-
         case "DRIVER":
           navigate("/driver-portal");
           break;
-
         case "ASSISTANT":
           navigate("/assistant-portal");
           break;
-
         case "ADMIN":
-          navigate("/dashboard");
+          navigate("/dashboard"); // Only admin can access /dashboard
           break;
-
         default:
-          toast.error(
-            "You are not authorized to access the admin dashboard."
-          );
-
+          // Block non-admin from dashboard
+          toast.error("You are not authorized to access the admin dashboard.");
           localStorage.removeItem("token");
           localStorage.removeItem("user");
           localStorage.removeItem("isAuthenticated");
-
-          navigate("/");
+          navigate("/"); // Redirect to home/login
       }
     } catch (error: any) {
       console.error("Login error:", error);
-
       localStorage.removeItem("token");
       localStorage.removeItem("isAuthenticated");
       localStorage.removeItem("user");
-
       toast.error(
-        error.response?.data?.message ||
-          "Login failed. Check your credentials."
+        error.response?.data?.message || "Login failed. Check your credentials."
       );
     } finally {
       setIsLoading(false);
@@ -192,21 +154,14 @@ export default function Login() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!forgotEmail.trim()) {
+    if (!forgotEmail) {
       toast.error("Please enter your email.");
       return;
     }
-
     try {
-      await api.post(FORGOT_URL, {
-        email: forgotEmail.trim(),
-      });
-
+      await api.post(FORGOT_URL, { email: forgotEmail });
       toast.success("Password reset link sent to your email.");
-
       setIsForgotOpen(false);
-      setForgotEmail("");
     } catch (error: any) {
       toast.error(
         error.response?.data?.message || "Failed to send reset link."
@@ -221,44 +176,33 @@ export default function Login() {
           <CardTitle className="text-2xl font-bold text-center">
             🎓 SchoolTrack Transport
           </CardTitle>
-
           <CardDescription className="text-center">
-            Enter your email or phone number to access the system
+            Enter your credentials to access the system
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email or Phone */}
             <div className="space-y-2">
-              <label
-                htmlFor="identifier"
-                className="text-sm font-medium"
-              >
+              <label htmlFor="identifier" className="text-sm font-medium">
                 Email or Phone Number
               </label>
-
               <Input
                 id="identifier"
                 type="text"
-                placeholder="Email or 0700123456"
+                autoComplete="username"
+                placeholder="your@email.com or 07XXXXXXXX"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 required
                 disabled={isLoading}
-                autoComplete="username"
               />
             </div>
 
-            {/* Password */}
             <div className="space-y-2 relative">
-              <label
-                htmlFor="password"
-                className="text-sm font-medium"
-              >
+              <label htmlFor="password" className="text-sm font-medium">
                 Password
               </label>
-
               <Input
                 id="password"
                 type={showPassword ? "text" : "password"}
@@ -267,26 +211,16 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 disabled={isLoading}
-                autoComplete="current-password"
               />
-
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-8 text-gray-500"
-                aria-label={
-                  showPassword ? "Hide password" : "Show password"
-                }
               >
-                {showPassword ? (
-                  <EyeOff size={18} />
-                ) : (
-                  <Eye size={18} />
-                )}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
 
-            {/* Forgot Password */}
             <div className="text-right">
               <button
                 type="button"
@@ -297,12 +231,7 @@ export default function Login() {
               </button>
             </div>
 
-            {/* Sign In */}
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={isLoading}
-            >
+            <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
@@ -314,15 +243,10 @@ export default function Login() {
                 <h2 className="text-lg font-semibold mb-2 text-center">
                   Reset Password
                 </h2>
-
                 <p className="text-sm text-gray-500 mb-4 text-center">
                   Enter your email to receive a password reset link.
                 </p>
-
-                <form
-                  onSubmit={handleForgotPassword}
-                  className="space-y-3"
-                >
+                <form onSubmit={handleForgotPassword} className="space-y-3">
                   <Input
                     type="email"
                     placeholder="Enter your email"
@@ -330,20 +254,15 @@ export default function Login() {
                     onChange={(e) => setForgotEmail(e.target.value)}
                     required
                   />
-
                   <div className="flex gap-2">
                     <Button type="submit" className="w-full">
                       Send Link
                     </Button>
-
                     <Button
                       type="button"
                       variant="outline"
                       className="w-full"
-                      onClick={() => {
-                        setIsForgotOpen(false);
-                        setForgotEmail("");
-                      }}
+                      onClick={() => setIsForgotOpen(false)}
                     >
                       Cancel
                     </Button>

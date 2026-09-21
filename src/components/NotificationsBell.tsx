@@ -1,5 +1,7 @@
 import { Bell, Bus, MapPin, AlertTriangle } from "lucide-react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import {
   Popover,
   PopoverContent,
@@ -107,6 +109,54 @@ export function NotificationsBell() {
     unreadCountData?.count ??
     unreadCountData?.data?.unreadCount ??
     list.filter((n: any) => !n.read && !n.readAt).length;
+
+  // Active toast pop-up for new notifications — previously only proximity
+  // alerts would naturally feel "urgent" since they're the only ones a
+  // person might actively be watching for; onboard/offboard now get the
+  // same immediate pop-up treatment instead of silently waiting in the
+  // bell until someone happens to open it. Fires only for notifications
+  // that weren't already present on a previous poll, and specifically
+  // skips the very first load, so opening the app doesn't dump a toast
+  // for every pre-existing unread item — only genuinely new ones.
+  const seenIdsRef = useRef<Set<string | number>>(new Set());
+  const firstLoadRef = useRef(true);
+
+  useEffect(() => {
+    if (!Array.isArray(notifications)) return;
+
+    if (firstLoadRef.current) {
+      for (const n of notifications) {
+        if (n?.id != null) seenIdsRef.current.add(n.id);
+      }
+      firstLoadRef.current = false;
+      return;
+    }
+
+    for (const n of notifications) {
+      if (n?.id == null || seenIdsRef.current.has(n.id)) continue;
+      seenIdsRef.current.add(n.id);
+
+      const kind = detectKind(n);
+      const message = `${n.title ?? "Notification"}: ${cleanMessage(n.message ?? n.body)}`;
+
+      switch (kind) {
+        case "PANIC":
+          toast.error(message, { duration: 15_000 });
+          break;
+        case "PROXIMITY":
+          toast.warning(message, { duration: 8_000 });
+          break;
+        case "ONBOARD":
+          toast.success(message, { duration: 6_000 });
+          break;
+        case "OFFBOARD":
+          toast(message, { duration: 6_000 });
+          break;
+        default:
+          toast(message);
+      }
+    }
+  }, [notifications]);
 
   const markReadMutation = useMutation({
     mutationFn: (id: number | string) => markNotificationRead(id),
