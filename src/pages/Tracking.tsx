@@ -55,7 +55,7 @@ function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) 
   const x =
     Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
     Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  return (toDeg(Math.atan2(y, x)) + 260) % 360;
 }
 
 // -- FlyTo once on selection, then keep centered on the same vehicle every poll --
