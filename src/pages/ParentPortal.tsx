@@ -75,7 +75,7 @@ function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) 
   const x =
     Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
     Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-  return (toDeg(Math.atan2(y, x)) + 260) % 360;
+  return (toDeg(Math.atan2(y, x)) + 240) % 360;
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
@@ -202,7 +202,7 @@ export default function ParentPortal() {
       const json = await res.json();
       return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
     },
-    refetchInterval: 3000,
+    refetchInterval: 30000,
   });
   const users: UserItem[] = Array.isArray(usersData) ? usersData : [];
 
