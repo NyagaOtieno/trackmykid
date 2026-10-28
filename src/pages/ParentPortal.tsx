@@ -26,6 +26,8 @@ import { useMemo, useEffect, useRef, useState } from "react";
 // render the identical bus marker instead of the old mismatched
 // flaticon PNGs (which also had inverted moving/stopped colors).
 import { createBusIcon } from "@/utils/vehicleIcon";
+import { BrandLogo, BrandFooter } from "@/components/BrandLogo";
+import { BRAND } from "@/lib/brand";
 
 /* ---------------- Auto-fit map bounds component ---------------- */
 function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression | null }) {
@@ -54,7 +56,7 @@ function FocusOnSelected({ target }: { target: { lat: number; lon: number } | nu
    comment block in Tracking.tsx. Rather than trust it directly, we compute
    bearing ourselves from consecutive real GPS fixes per bus, holding the
    last known bearing when movement is below a jitter-range threshold. */
-const MIN_MOVE_METERS = 3;
+const MIN_MOVE_METERS = 8;
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371000;
@@ -75,7 +77,7 @@ function computeBearing(lat1: number, lon1: number, lat2: number, lon2: number) 
   const x =
     Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
     Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
-  return (toDeg(Math.atan2(y, x)) + 240) % 360;
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
 /* ---------------- API ENDPOINTS ---------------- */
@@ -423,9 +425,12 @@ export default function ParentPortal() {
     <div className="min-h-screen bg-muted/30">
       <header className="bg-card border-b p-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bus className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-bold">Parent Portal</h1>
+          <div className="flex items-center gap-3">
+            <BrandLogo variant="icon" className="h-9 w-9" />
+            <div className="leading-tight">
+              <h1 className="text-lg font-bold">{BRAND.name}</h1>
+              <p className="text-xs text-muted-foreground">Parent Portal</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <NotificationsBell />
@@ -596,6 +601,7 @@ export default function ParentPortal() {
             </MapContainer>
         </div>
       </main>
+      <BrandFooter />
     </div>
   );
 }

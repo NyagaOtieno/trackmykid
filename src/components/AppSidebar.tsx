@@ -11,6 +11,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { BrandLogo } from '@/components/BrandLogo';
+import { BRAND } from '@/lib/brand';
 
 const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: Home },
@@ -25,21 +27,30 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { open: desktopOpen, isMobile, setOpenMobile } = useSidebar();
-  // In the mobile drawer the sidebar is always full-width, so always show labels
-  const open = isMobile ? true : desktopOpen;
+  const { open } = useSidebar();
 
   return (
-    <Sidebar>
+    <Sidebar className={open ? 'w-60' : 'w-14'}>
       <SidebarContent>
-        <div className="p-4 border-b border-sidebar-border">
+        {/* Brand header. The logo sits on a white tile because the sidebar is
+            dark navy and the artwork has dark lettering/transparent areas. */}
+        <div className="p-3 border-b border-sidebar-border">
           {open ? (
-            <div className="flex items-center gap-2">
-              <Bus className="h-6 w-6 text-sidebar-primary" />
-              <span className="text-lg font-bold text-sidebar-foreground">SchoolTrack</span>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 shadow-sm">
+                <BrandLogo variant="icon" className="h-full w-full" />
+              </div>
+              <div className="min-w-0 leading-tight">
+                <span className="block truncate text-base font-bold text-sidebar-foreground">{BRAND.name}</span>
+                <span className="block truncate text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
+                  {BRAND.tagline.replace(/\.$/, '')}
+                </span>
+              </div>
             </div>
           ) : (
-            <Bus className="h-6 w-6 text-sidebar-primary mx-auto" />
+            <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white p-1 shadow-sm">
+              <BrandLogo variant="icon" className="h-full w-full" />
+            </div>
           )}
         </div>
         
@@ -52,10 +63,6 @@ export function AppSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
-                      onClick={() => {
-                        // Close the mobile drawer after picking a page
-                        if (isMobile) setOpenMobile(false);
-                      }}
                       className={({ isActive }) =>
                         isActive
                           ? 'bg-sidebar-accent text-sidebar-primary font-medium'
@@ -71,6 +78,12 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {open && (
+          <div className="mt-auto p-4 text-[11px] text-sidebar-foreground/50">
+            Powered by <span className="font-semibold text-sidebar-foreground/80">{BRAND.poweredBy}</span>
+          </div>
+        )}
       </SidebarContent>
     </Sidebar>
   );

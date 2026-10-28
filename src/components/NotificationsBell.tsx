@@ -174,9 +174,12 @@ export function NotificationsBell() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button className="relative flex items-center gap-1.5 px-3 py-1 border rounded-lg text-sm hover:bg-muted transition-colors">
+        <button
+          aria-label="Notifications"
+          className="relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1 border rounded-lg text-sm hover:bg-muted transition-colors"
+        >
           <Bell className="h-4 w-4" />
-          Notifications
+          <span className="hidden sm:inline">Notifications</span>
           {unreadCount > 0 && (
             <span className="absolute -top-1.5 -right-1.5 h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[10px] leading-4 text-center">
               {unreadCount > 9 ? "9+" : unreadCount}

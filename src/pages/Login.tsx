@@ -12,6 +12,8 @@ import {
 import { toast } from "sonner";
 import api from "./api"; // ✅ consolidated onto the hardened client (timeout + 401/403 auto-logout) — was using a separate, weaker duplicate axios instance in @/api/axiosConfig
 import { Eye, EyeOff } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
+import { BRAND } from "@/lib/brand";
 
 // ✅ Backend endpoints (baseURL already handled by api)
 const AUTH_URL = "/auth/login";
@@ -172,12 +174,14 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">
-            🎓 SchoolTrack Transport
-          </CardTitle>
+        <CardHeader className="space-y-3">
+          {/* White tile keeps the black "watch" lettering readable in any theme */}
+          <div className="mx-auto w-full max-w-sm rounded-xl bg-white p-3 shadow-sm ring-1 ring-border">
+            <BrandLogo variant="full" className="h-auto w-full" />
+          </div>
+          <CardTitle className="sr-only">{BRAND.name}</CardTitle>
           <CardDescription className="text-center">
-            Enter your credentials to access the system
+            Sign in with your email or phone number
           </CardDescription>
         </CardHeader>
 

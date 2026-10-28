@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { verifyFirstLoginOtp, resendFirstLoginOtp } from "./api";
 
 // POST /api/auth/first-login/verify-otp — body {otp, newPassword} — completes
@@ -105,8 +106,9 @@ export default function FirstLoginVerify() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
+          <BrandLogo variant="icon" className="mx-auto h-16 w-16" />
           <CardTitle className="text-2xl font-bold text-center">
-            🔐 Confirm Your Account
+            Confirm Your Account
           </CardTitle>
           <CardDescription className="text-center">
             Enter the OTP we sent you and choose a new password to finish setting up your account.

@@ -10,6 +10,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import { Toaster, toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import { BrandLogo, BrandFooter } from "@/components/BrandLogo";
 
 // Fix Leaflet marker icons
 delete L.Icon.Default.prototype._getIconUrl;
@@ -389,9 +390,12 @@ export default function AssistantPortal() {
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">Bus Assistant Portal</h1>
-            <p className="text-muted-foreground mt-1">Welcome, {user?.name || "Assistant"} — manage student attendance</p>
+          <div className="flex items-center gap-3">
+            <BrandLogo variant="icon" className="h-12 w-12 shrink-0" />
+            <div>
+              <h1 className="text-3xl font-bold">Bus Assistant Portal</h1>
+              <p className="text-muted-foreground mt-1">Welcome, {user?.name || "Assistant"} — manage student attendance</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
@@ -553,6 +557,7 @@ export default function AssistantPortal() {
             </div>
           </CardContent>
         </Card>
+        <BrandFooter />
       </div>
     </div>
   );
