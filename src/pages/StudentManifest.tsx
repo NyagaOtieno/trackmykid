@@ -14,31 +14,31 @@ interface Student {
 interface Manifest {
   id: number;
   studentId: number;
-  status: "CHECKED_IN" | "CHECKED_OUT" | "NOT_CHECKED";
-  date?: string;
+  status: "CHECKED_IN" | "CHECKED_OUT";
   student: Student;
 }
 
+const authHeaders = () => {
+  const token = localStorage.getItem("token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const fetchStudents = async () => {
-  const res = await axios.get("https://schooltransport-production.up.railway.app/api/students");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/students", { headers: authHeaders() });
   return res.data.data as Student[];
 };
 
 const fetchManifests = async () => {
-  const res = await axios.get("https://schooltransport-production.up.railway.app/api/manifests");
+  const res = await axios.get("https://tmk-api.joshpitah.co.ke/api/manifests", { headers: authHeaders() });
   return res.data as Manifest[];
 };
 
 export default function StudentManifest() {
-  const { data: students = [], isLoading: studentsLoading } = useQuery<Student[]>({
-    queryKey: ["students"],
-    queryFn: fetchStudents,
+  const { data: students = [], isLoading: studentsLoading } = useQuery(["students"], fetchStudents, {
     refetchInterval: 10000, // refresh every 10 seconds
   });
 
-  const { data: manifests = [], isLoading: manifestsLoading } = useQuery<Manifest[]>({
-    queryKey: ["manifests"],
-    queryFn: fetchManifests,
+  const { data: manifests = [], isLoading: manifestsLoading } = useQuery(["manifests"], fetchManifests, {
     refetchInterval: 10000,
   });
 
@@ -52,7 +52,7 @@ export default function StudentManifest() {
     <div className="space-y-4">
       <div className="flex gap-4">
         <Badge>Total Students: {students.length}</Badge>
-        <Badge className="bg-green-600 text-white hover:bg-green-700">Checked In: {checkedInIds.length}</Badge>
+        <Badge variant="success">Checked In: {checkedInIds.length}</Badge>
         <Badge variant="destructive">Checked Out: {checkedOutIds.length}</Badge>
       </div>
 
@@ -68,7 +68,7 @@ export default function StudentManifest() {
           {students.map(student => {
             const latestManifest = manifests
               .filter(m => m.studentId === student.id)
-              .sort((a, b) => new Date(b.date || "").getTime() - new Date(a.date || "").getTime())[0];
+              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
             const status = latestManifest?.status || "NOT_CHECKED";
 
@@ -77,7 +77,7 @@ export default function StudentManifest() {
                 <TableCell>{student.name}</TableCell>
                 <TableCell>{student.grade}</TableCell>
                 <TableCell>
-                  {status === "CHECKED_IN" && <Badge className="bg-green-600 text-white hover:bg-green-700">Checked In</Badge>}
+                  {status === "CHECKED_IN" && <Badge variant="success">Checked In</Badge>}
                   {status === "CHECKED_OUT" && <Badge variant="destructive">Checked Out</Badge>}
                   {status === "NOT_CHECKED" && <Badge>Not Checked</Badge>}
                 </TableCell>

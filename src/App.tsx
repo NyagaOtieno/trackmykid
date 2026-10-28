@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import React from "react";
 import Login from "./pages/Login";
+import FirstLoginVerify from "./pages/FirstLoginVerify";
 import Dashboard from "./pages/Dashboard";
 import Students from "./pages/Students";
 import Buses from "./pages/Buses";
@@ -34,6 +35,7 @@ const App = () => (
         <Routes>
           {/* Public Route */}
           <Route path="/" element={<Login />} />
+          <Route path="/first-login" element={<FirstLoginVerify />} />
 
           {/* Protected Routes */}
           <Route element={<ProtectedRoute />}>

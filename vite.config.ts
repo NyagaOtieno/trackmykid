@@ -9,35 +9,28 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"), // Allows "@/components/..."
     },
   },
-  base: "/", // Base path, adjust if deploying under subfolder
+  base: "/", // Set base path, change if deploying under subfolder
   server: {
     open: true, // Opens browser automatically on dev
-    port: 5173, 
+    port: 5173, // Optional: specify port
     proxy: {
-      // Proxy for local backend (e.g., Node.js)
+      // Example: proxy API calls to backend during development
       "/api": {
         target: "http://localhost:3000",
         changeOrigin: true,
         secure: false,
-      },
-      // Proxy for Railway production API
-      "/railway-api": {
-        target: "https://mytrack-production.up.railway.app",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/railway-api/, ""),
-        secure: true,
       },
     },
   },
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true, // Generate source maps for debugging
+    sourcemap: true, // Optional: generate source maps for debugging
     rollupOptions: {
       input: path.resolve(__dirname, "index.html"), // SPA entry
       output: {
         manualChunks: {
-          // Split vendor chunks
+          // Optional: split vendor chunks
           react: ["react", "react-dom"],
         },
       },
@@ -46,7 +39,7 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        additionalData: `@import "@/styles/variables.scss";`, // Auto-import SCSS variables
+        additionalData: `@import "@/styles/variables.scss";`, // Auto import SCSS variables
       },
     },
   },

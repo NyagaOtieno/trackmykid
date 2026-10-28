@@ -1,151 +1,372 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { z } from "zod";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Loader2, Bus, School, MapPin, Users } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Loader2 } from "lucide-react";
 import axios from "axios";
 
-export default function AddBusForm({ onSuccess }: { onSuccess?: () => void }) {
+// Form Validation Schema
+const busSchema = z.object({
+  name: z.string().min(1, "Bus name is required"),
+  plateNumber: z.string().min(1, "Plate number is required"),
+  imei: z
+    .string()
+    .optional()
+    .refine((v) => !v || /^\d{15}$/.test(v), "IMEI must be 15 digits"),
+  capacity: z.preprocess(
+    (val) => Number(val),
+    z.number().min(1, "Capacity is required")
+  ),
+  route: z.string().optional(),
+  driverId: z.string().min(1, "Driver is required"),
+  assistantId: z.string().min(1, "Assistant is required"),
+  schoolId: z.string().min(1, "School is required"),
+});
+
+// API Helpers
+const unwrap = (data: any) =>
+  Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+
+const getDrivers = async () => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get(
+    "https://tmk-api.joshpitah.co.ke/api/users?role=DRIVER",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return unwrap(res.data);
+};
+
+const getAssistants = async () => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get(
+    "https://tmk-api.joshpitah.co.ke/api/users?role=ASSISTANT",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return unwrap(res.data);
+};
+
+const getSchools = async () => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get(
+    "https://tmk-api.joshpitah.co.ke/api/schools",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return unwrap(res.data);
+};
+
+const addBus = async (bus: any) => {
+  const token = localStorage.getItem("token");
+  const body = {
+    ...bus,
+    driverId: Number(bus.driverId),
+    assistantId: Number(bus.assistantId),
+    schoolId: Number(bus.schoolId),
+    capacity: Number(bus.capacity),
+  };
+  const res = await axios.post(
+    "https://tmk-api.joshpitah.co.ke/api/buses",
+    body,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
+
+export default function AddBusForm() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ 
-    name: "", 
-    plateNumber: "", 
-    route: "", 
-    capacity: 35, // Matches your Postman body
-    driverId: "", 
-    assistantId: "", 
-    schoolId: "" 
+  const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || "null");
+
+  if (!user || !token) navigate("/login");
+
+  const [form, setForm] = useState({
+    name: "",
+    plateNumber: "",
+    imei: "",
+    capacity: "",
+    route: "",
+    driverId: "",
+    assistantId: "",
+    schoolId: user?.schoolId || "",
   });
 
-  // Fetching Schools, Users, and existing Buses
-  const { data: schools, isLoading: sLoading } = useQuery({ 
-    queryKey: ["schools"], 
-    queryFn: () => axios.get("https://schooltransport-production.up.railway.app/api/schools", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    }).then(res => res.data)
+  const [errors, setErrors] = useState<any>({});
+
+  // Fetch drivers, assistants, schools
+  const { data: driversData, isLoading: driversLoading } = useQuery({
+    queryKey: ["drivers"],
+    queryFn: getDrivers,
   });
 
-  const { data: allUsers, isLoading: uLoading } = useQuery({ 
-    queryKey: ["users"], 
-    queryFn: () => axios.get("https://schooltransport-production.up.railway.app/api/users", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    }).then(res => res.data)
+  const { data: assistantsData, isLoading: assistantsLoading } = useQuery({
+    queryKey: ["assistants"],
+    queryFn: getAssistants,
   });
 
-  const { data: buses, isLoading: bLoading } = useQuery({ 
-    queryKey: ["buses"], 
-    queryFn: () => axios.get("https://schooltransport-production.up.railway.app/api/buses", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-    }).then(res => res.data)
+  const { data: schoolsData, isLoading: schoolsLoading } = useQuery({
+    queryKey: ["schools"],
+    queryFn: getSchools,
   });
 
-  // Filter Logic
-  const busyDriverIds = buses?.map((b: any) => String(b.driverId)) || [];
-  const busyAssistantIds = buses?.map((b: any) => String(b.assistantId)) || [];
+  // Filter only unassigned users with correct roles and same school
+  const drivers =
+    driversData?.filter(
+      (d: any) =>
+        !d.assignedBusId &&
+        d.role.toUpperCase() === "DRIVER" &&
+        d.schoolId === Number(form.schoolId)
+    ) || [];
 
-  const availableDrivers = allUsers?.filter((u: any) => 
-    u.role?.toUpperCase() === "DRIVER" && !busyDriverIds.includes(String(u.id))
-  ) || [];
+  const assistants =
+    assistantsData?.filter(
+      (a: any) =>
+        !a.assignedBusId &&
+        a.role.toUpperCase() === "ASSISTANT" &&
+        a.schoolId === Number(form.schoolId)
+    ) || [];
 
-  const availableAssistants = allUsers?.filter((u: any) => 
-    u.role?.toUpperCase() === "ASSISTANT" && !busyAssistantIds.includes(String(u.id))
-  ) || [];
-
-  const handleSave = async () => {
-    try {
-      // Mapping the state to your EXACT Postman JSON structure
-      const payload = {
-        name: form.name,
-        plateNumber: form.plateNumber,
-        capacity: Number(form.capacity),
-        route: form.route,
-        driverId: Number(form.driverId),
-        assistantId: Number(form.assistantId),
-        schoolId: Number(form.schoolId)
-      };
-
-      await axios.post("https://schooltransport-production.up.railway.app/api/buses", payload, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
-      });
-
-      toast.success("Bus created successfully!");
-      queryClient.invalidateQueries({ queryKey: ["buses"] });
-      onSuccess?.();
-    } catch (e: any) {
-      toast.error(e.response?.data?.message || "Check if all IDs are selected correctly");
+  // Auto-select first available driver/assistant if value not set
+  useEffect(() => {
+    if (!form.driverId && drivers.length > 0) {
+      setForm((prev) => ({ ...prev, driverId: drivers[0].id.toString() }));
     }
+    if (!form.assistantId && assistants.length > 0) {
+      setForm((prev) => ({ ...prev, assistantId: assistants[0].id.toString() }));
+    }
+  }, [drivers, assistants]);
+
+  // Mutation to add bus
+  const mutation = useMutation({
+    mutationFn: addBus,
+    onSuccess: () => {
+      toast.success("Bus added successfully!");
+      queryClient.invalidateQueries(["buses"]);
+      navigate("/buses");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to add bus");
+    },
+  });
+
+  const handleSubmit = () => {
+    const parsed = busSchema.safeParse(form);
+    if (!parsed.success) {
+      const fieldErrors: any = {};
+      parsed.error.errors.forEach((e) => {
+        if (e.path.length > 0) fieldErrors[e.path[0]] = e.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
+    // Convert IDs to numbers before sending
+    const payload = {
+      ...parsed.data,
+      driverId: Number(parsed.data.driverId),
+      assistantId: Number(parsed.data.assistantId),
+      schoolId: Number(parsed.data.schoolId),
+      capacity: Number(parsed.data.capacity),
+    };
+
+    mutation.mutate(payload);
   };
 
-  if (uLoading || bLoading || sLoading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin" /></div>;
+  const resetForm = () => {
+    setForm({
+      name: "",
+      plateNumber: "",
+      imei: "",
+      capacity: "",
+      route: "",
+      driverId: drivers[0]?.id.toString() || "",
+      assistantId: assistants[0]?.id.toString() || "",
+      schoolId: user?.schoolId || "",
+    });
+    setErrors({});
+  };
 
-  const selectStyle = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none";
+  if (driversLoading || assistantsLoading || schoolsLoading) {
+    return (
+      <div className="flex justify-center mt-20">
+        <Loader2 className="animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4 p-1">
-      <DialogTitle className="text-xl font-bold flex items-center gap-2"><Bus /> New Bus</DialogTitle>
-      <DialogDescription>Fill details exactly as required by the system.</DialogDescription>
+    <div className="min-h-screen bg-muted/30 p-6">
+      <Card className="max-w-xl mx-auto">
+        <CardHeader>
+          <CardTitle>Add New Bus</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Bus Name</Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g., Westlands Shuttle"
+              />
+              {errors.name && <p className="text-red-600">{errors.name}</p>}
+            </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Name</Label>
-          <Input placeholder="Evening Express" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
-        </div>
-        <div className="space-y-2">
-          <Label>Plate Number</Label>
-          <Input placeholder="KBB456Y" value={form.plateNumber} onChange={e => setForm({...form, plateNumber: e.target.value})} />
-        </div>
-      </div>
+            <div>
+              <Label>Plate Number</Label>
+              <Input
+                value={form.plateNumber}
+                onChange={(e) =>
+                  setForm({ ...form, plateNumber: e.target.value })
+                }
+                placeholder="e.g., KBB456Y"
+              />
+              {errors.plateNumber && (
+                <p className="text-red-600">{errors.plateNumber}</p>
+              )}
+            </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Route</Label>
-          <Input placeholder="Route B" value={form.route} onChange={e => setForm({...form, route: e.target.value})} />
-        </div>
-        <div className="space-y-2">
-          <Label>Capacity</Label>
-          <Input type="number" value={form.capacity} onChange={e => setForm({...form, capacity: Number(e.target.value)})} />
-        </div>
-      </div>
+            <div>
+              <Label>Tracker IMEI (optional)</Label>
+              <Input
+                value={form.imei}
+                onChange={(e) => setForm({ ...form, imei: e.target.value })}
+                placeholder="e.g., 353691849836001"
+              />
+              {errors.imei && <p className="text-red-600">{errors.imei}</p>}
+            </div>
 
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1"><School size={14}/> School</Label>
-        <select className={selectStyle} value={form.schoolId} onChange={e => setForm({...form, schoolId: e.target.value})}>
-          <option value="">-- Choose School --</option>
-          {schools?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </div>
+            <div>
+              <Label>Capacity</Label>
+              <Input
+                type="number"
+                value={form.capacity}
+                onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                placeholder="e.g., 35"
+              />
+              {errors.capacity && (
+                <p className="text-red-600">{errors.capacity}</p>
+              )}
+            </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Driver</Label>
-          <select className={selectStyle} value={form.driverId} onChange={e => setForm({...form, driverId: e.target.value})}>
-            <option value="">-- Select --</option>
-            {availableDrivers.map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-        </div>
-        <div className="space-y-2">
-          <Label>Assistant</Label>
-          <select className={selectStyle} value={form.assistantId} onChange={e => setForm({...form, assistantId: e.target.value})}>
-            <option value="">-- Select --</option>
-            {availableAssistants.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        </div>
-      </div>
+            <div>
+              <Label>Route</Label>
+              <Input
+                value={form.route}
+                onChange={(e) => setForm({ ...form, route: e.target.value })}
+                placeholder="e.g., Route B"
+              />
+            </div>
 
-      <Button 
-        className="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold" 
-        onClick={handleSave}
-        disabled={!form.driverId || !form.schoolId || !form.name}
-      >
-        Submit to API
-      </Button>
+            {/* Driver */}
+            <div>
+              <Label>Driver</Label>
+              <Select
+                value={form.driverId}
+                onValueChange={(val) => setForm({ ...form, driverId: val })}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {drivers.find((d) => d.id.toString() === form.driverId)?.name ||
+                      "Select Driver"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {drivers.length > 0 ? (
+                    drivers.map((d: any) => (
+                      <SelectItem key={d.id} value={d.id.toString()}>
+                        {d.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem disabled>No available drivers</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {errors.driverId && <p className="text-red-600">{errors.driverId}</p>}
+            </div>
 
-      <div className="mt-2 text-[10px] text-gray-500 italic">
-        * System check: {availableDrivers.length} available drivers | {schools?.length} schools found.
-      </div>
+            {/* Assistant */}
+            <div>
+              <Label>Assistant</Label>
+              <Select
+                value={form.assistantId}
+                onValueChange={(val) => setForm({ ...form, assistantId: val })}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {assistants.find((a) => a.id.toString() === form.assistantId)?.name ||
+                      "Select Assistant"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {assistants.length > 0 ? (
+                    assistants.map((a: any) => (
+                      <SelectItem key={a.id} value={a.id.toString()}>
+                        {a.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <SelectItem disabled>No available assistants</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {errors.assistantId && (
+                <p className="text-red-600">{errors.assistantId}</p>
+              )}
+            </div>
+
+            {/* School */}
+            <div>
+              <Label>School</Label>
+              <Select
+                onValueChange={(val) => setForm({ ...form, schoolId: val })}
+                value={form.schoolId}
+              >
+                <SelectTrigger>
+                  <SelectValue>
+                    {schoolsData?.find((s: any) => s.id.toString() === form.schoolId)?.name ||
+                      "Select School"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {schoolsData?.map((s: any) => (
+                    <SelectItem key={s.id} value={s.id.toString()}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.schoolId && <p className="text-red-600">{errors.schoolId}</p>}
+            </div>
+          </div>
+
+          <div className="flex gap-4 mt-4">
+            <Button onClick={handleSubmit} disabled={mutation.isLoading}>
+              {mutation.isLoading ? "Saving..." : "Save Bus"}
+            </Button>
+            <Button variant="secondary" onClick={resetForm}>
+              Reset
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Home, Map, Users, Bus, ClipboardList, UserCog, UsersRound, Settings, Truck } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Sidebar,
   SidebarContent,
@@ -11,6 +11,8 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '@/components/ui/sidebar';
+import { BrandLogo } from '@/components/BrandLogo';
+import { BRAND } from '@/lib/brand';
 
 const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: Home },
@@ -26,29 +28,29 @@ const menuItems = [
 
 export function AppSidebar() {
   const { open } = useSidebar();
-  const location = useLocation();
-
-  // Helper function to check if a route is active
-  const isActiveRoute = (url: string) => {
-    if (url === '/dashboard') {
-      return location.pathname === '/dashboard';
-    }
-    // For other routes, check if the pathname starts with the URL
-    // This handles sub-routes like /buses/add highlighting /buses
-    return location.pathname.startsWith(url);
-  };
 
   return (
     <Sidebar className={open ? 'w-60' : 'w-14'}>
       <SidebarContent>
-        <div className="p-4 border-b border-sidebar-border">
+        {/* Brand header. The logo sits on a white tile because the sidebar is
+            dark navy and the artwork has dark lettering/transparent areas. */}
+        <div className="p-3 border-b border-sidebar-border">
           {open ? (
-            <div className="flex items-center gap-2">
-              <Bus className="h-6 w-6 text-sidebar-primary" />
-              <span className="text-lg font-bold text-sidebar-foreground">SchoolTrack</span>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 shadow-sm">
+                <BrandLogo variant="icon" className="h-full w-full" />
+              </div>
+              <div className="min-w-0 leading-tight">
+                <span className="block truncate text-base font-bold text-sidebar-foreground">{BRAND.name}</span>
+                <span className="block truncate text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
+                  {BRAND.tagline.replace(/\.$/, '')}
+                </span>
+              </div>
             </div>
           ) : (
-            <Bus className="h-6 w-6 text-sidebar-primary mx-auto" />
+            <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-white p-1 shadow-sm">
+              <BrandLogo variant="icon" className="h-full w-full" />
+            </div>
           )}
         </div>
         
@@ -56,29 +58,32 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => {
-                const isActive = isActiveRoute(item.url);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton 
-                      asChild 
-                      isActive={isActive}
-                      className={isActive ? "bg-sidebar-primary/20 text-sidebar-primary-foreground border-l-2 border-sidebar-primary" : ""}
+              {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild>
+                    <NavLink
+                      to={item.url}
+                      className={({ isActive }) =>
+                        isActive
+                          ? 'bg-sidebar-accent text-sidebar-primary font-medium'
+                          : 'hover:bg-sidebar-accent/50'
+                      }
                     >
-                      <NavLink
-                        to={item.url}
-                        className="flex items-center gap-2"
-                      >
-                        <item.icon className="h-4 w-4" />
-                        {open && <span>{item.title}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+                      <item.icon className="h-4 w-4" />
+                      {open && <span>{item.title}</span>}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {open && (
+          <div className="mt-auto p-4 text-[11px] text-sidebar-foreground/50">
+            Powered by <span className="font-semibold text-sidebar-foreground/80">{BRAND.poweredBy}</span>
+          </div>
+        )}
       </SidebarContent>
     </Sidebar>
   );

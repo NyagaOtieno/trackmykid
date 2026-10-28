@@ -10,8 +10,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import api from "@/api/axiosConfig";
+import api from "./api"; // ✅ consolidated onto the hardened client (timeout + 401/403 auto-logout) — was using a separate, weaker duplicate axios instance in @/api/axiosConfig
 import { Eye, EyeOff } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
+import { BRAND } from "@/lib/brand";
 
 // ✅ Backend endpoints (baseURL already handled by api)
 const AUTH_URL = "/auth/login";
@@ -20,7 +22,7 @@ const FORGOT_URL = "/auth/forgot-password";
 export default function Login() {
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState(""); // email OR phone
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -60,11 +62,52 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      // 🚀 Login via api instance
-      const response = await api.post(AUTH_URL, { email, password });
-      const { token, user } = response.data || {};
+      // Send whichever field matches what the person typed. The local
+      // copy of authRoutes.js only reads `email`, but production has
+      // diverged (it already returns mustChangePassword/isFirstLogin,
+      // which this local copy doesn't either) — sending the value under
+      // the correct-looking key covers a backend that branches on
+      // req.body.email vs req.body.phone. Looks like an email (has an
+      // @ and a dot) → send as email; otherwise treat as a phone number.
+      const trimmed = identifier.trim();
+      const looksLikeEmail = /^\S+@\S+\.\S+$/.test(trimmed);
+      const payload = looksLikeEmail
+        ? { email: trimmed, password }
+        : { phone: trimmed, password };
 
-      if (!token || !user) {
+      // 🚀 Login via api instance
+      const response = await api.post(AUTH_URL, payload);
+      const { token, user, mustChangePassword, isFirstLogin, otpSent } = response.data || {};
+
+      if (!token) {
+        throw new Error("Invalid login response from server");
+      }
+
+      // ✅ First-time login: backend wants OTP verification + a new
+      // password before this session is fully authenticated. Save the
+      // token (needed as Bearer for the verify-otp call) and the partial
+      // user info, but deliberately do NOT set isAuthenticated yet —
+      // ProtectedRoute gates on that flag, so this keeps the user
+      // confined to /first-login until they actually complete it.
+      // First-time forced password change: the backend only ever sends
+      // an OTP when mustChangePassword is true (isFirstLogin alone,
+      // without mustChangePassword, sends no OTP — so it's not a valid
+      // gate on its own, or /first-login/verify-otp would 400 with
+      // "No pending OTP").
+      if (mustChangePassword) {
+        localStorage.setItem("token", token);
+        if (user) localStorage.setItem("user", JSON.stringify(user));
+
+        toast.info(
+          otpSent
+            ? "First-time login — enter the OTP we just sent you to set a new password."
+            : "First-time login — you need to set a new password to continue."
+        );
+        navigate("/first-login");
+        return;
+      }
+
+      if (!user) {
         throw new Error("Invalid login response from server");
       }
 
@@ -72,6 +115,7 @@ export default function Login() {
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("isAuthenticated", "true");
+      localStorage.setItem("loginTime", String(Date.now()));
 
       toast.success(`Welcome back, ${user.name || "User"}!`);
 
@@ -130,27 +174,30 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
       <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">
-            🎓 SchoolTrack Transport
-          </CardTitle>
+        <CardHeader className="space-y-3">
+          {/* White tile keeps the black "watch" lettering readable in any theme */}
+          <div className="mx-auto w-full max-w-sm rounded-xl bg-white p-3 shadow-sm ring-1 ring-border">
+            <BrandLogo variant="full" className="h-auto w-full" />
+          </div>
+          <CardTitle className="sr-only">{BRAND.name}</CardTitle>
           <CardDescription className="text-center">
-            Enter your credentials to access the system
+            Sign in with your email or phone number
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium">
-                Email
+              <label htmlFor="identifier" className="text-sm font-medium">
+                Email or Phone Number
               </label>
               <Input
-                id="email"
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="identifier"
+                type="text"
+                autoComplete="username"
+                placeholder="your@email.com or 07XXXXXXXX"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
                 disabled={isLoading}
               />
